@@ -1,10 +1,18 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from typing import List
+from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
+from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+import fetch_reports
+from langchain_openai import ChatOpenAI
+from model.data import ReportRequest, ReportResponse, TimelineActivity, UserTimelineResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
-from datetime import datetime, date
-import asyncio
+import dotenv   
+
+dotenv.load_dotenv()
 
 app = FastAPI()
 
@@ -12,20 +20,6 @@ app = FastAPI()
 DATABASE_URL = "postgresql+asyncpg://postgres:1234@localhost:5432/weekly_report_db"
 engine = create_async_engine(DATABASE_URL)
 async_session = async_sessionmaker(engine, class_=AsyncSession)
-
-# 응답 모델
-class TimelineActivity(BaseModel):
-    source: str
-    timestamp: str
-    content: str
-    metadata: Dict[str, Any]
-
-class UserTimelineResponse(BaseModel):
-    user_id: str
-    start_date: str
-    end_date: str
-    activities: List[TimelineActivity]
-    summary: Dict[str, int]
 
 # 데이터베이스 세션 의존성
 async def get_db_session():
@@ -394,6 +388,73 @@ async def database_health_check(session: AsyncSession = Depends(get_db_session))
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"데이터베이스 연결 오류: {str(e)}")
+    
+
+# CORS 설정: 프론트엔드(Vue)
+origins = [
+    "http://localhost:5173"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# LLM 로드 (OpenAI GPT-4o 사용)
+llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+
+
+# LangChain 프롬프트 템플릿
+template = """
+# 역할
+당신은 팀의 성과를 한눈에 파악해야 하는 유능한 팀장입니다.
+
+# 지시
+아래에 제공되는 task별 팀원들의 주간 보고서 내용을 바탕으로, 팀 전체의 관점에서 **핵심 성과, 발견된 문제점, 그리고 다음 주 공통 목표**를 요약하여 관리자용 보고서를 작성해 주세요.
+
+# 팀원별 보고 내용
+{team_reports}
+
+# 관리자용 요약 보고서:
+"""
+
+prompt = PromptTemplate.from_template(template)
+output_parser = StrOutputParser()
+
+# LangChain 체인 구성
+chain = prompt | llm | output_parser
+
+@app.post("/api/generate-summary", response_model=ReportResponse)
+async def generate_summary(request: ReportRequest):
+    """
+    요청받은 task_id와 기간에 해당하는 팀원들의 보고서를 취합하여
+    관리자용 요약 보고서를 생성합니다.
+    """
+    print(f"API 요청 수신: task_id={request.task_id}, 기간={request.start_date}~{request.end_date}")
+    
+    # 1. DB에서 데이터 가져오기
+    team_reports_text = fetch_reports(
+        task_id=request.task_id,
+        start_date=request.start_date,
+        end_date=request.end_date
+    )
+
+    if not team_reports_text:
+        raise HTTPException(status_code=404, detail="해당 기간/태스크에 대한 보고서가 없습니다.")
+
+    # 2. LangChain으로 관리자 보고서 생성
+    try:
+        print("🔄 관리자용 요약 보고서를 생성합니다...")
+        manager_summary = await chain.invoke({"team_reports": team_reports_text})
+        print("✅ 보고서 생성 완료")
+        return ReportResponse(summary=manager_summary)
+    except Exception as e:
+        print(f"LLM 호출 중 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail="보고서 생성 중 오류가 발생했습니다.")
 
 # 사용 예시
 if __name__ == "__main__":
