@@ -1,7 +1,7 @@
 <template>
   <div class="report-generator-wrapper">
     <div class="page-title-box">
-      <h1 class="page-title">보고서 생성기</h1>
+      <h1 class="page-title">Reportify</h1>
     </div>
 
     <div class="content">
@@ -122,7 +122,7 @@ const renderedMarkdown = computed(() => {
   // 보고서 내용 앞에 날짜 및 Task ID 정보 추가
   const dateInfo = formatDateForDisplay(startDate.value);
   const endDateInfo = formatDateForDisplay(endDate.value);
-  const headerInfo = `**보고서 생성 정보**\n\n- **Task ID**: ${taskId.value}\n- **기간**: ${dateInfo} ~ ${endDateInfo}\n\n---\n\n`;
+  const headerInfo = `**주간 업무 요약**\n\n- **Task ID**: ${taskId.value}\n- **보고 기간**: ${dateInfo} ~ ${endDateInfo}\n\n---\n\n`;
 
   const fullContent = headerInfo + reportText.value;
   return marked(fullContent);
@@ -316,7 +316,7 @@ const downloadAsWord = async () => {
         children: [
           // 제목
           new Paragraph({
-            children: [new TextRun({ text: "보고서 생성 정보", bold: true, size: 32 })],
+            children: [new TextRun({ text: "주간 업무 요약 보고서", bold: true, size: 32 })],
             heading: HeadingLevel.HEADING_1,
           }),
 
@@ -334,7 +334,7 @@ const downloadAsWord = async () => {
           // 기간
           new Paragraph({
             children: [
-              new TextRun({ text: "기간: ", bold: true }),
+              new TextRun({ text: "보고 기간: ", bold: true }),
               new TextRun({ text: `${dateInfo} ~ ${endDateInfo}` })
             ]
           }),
@@ -369,10 +369,13 @@ const downloadAsWord = async () => {
     // Word 문서를 blob으로 생성
     const blob = await Packer.toBlob(doc);
 
-    // 파일명 생성
-    const dateStr = formatDateForAPI(startDate.value);
-    const endDateStr = formatDateForAPI(endDate.value);
-    const filename = `보고서_Task${taskId.value}_${dateStr}_${endDateStr}.docx`;
+    // 파일명 생성 (더 현실적인 형태)
+    // 주차 계산 (시작 날짜 기준)
+    const startDateObj = startDate.value;
+    const weekNumber = Math.ceil(startDateObj.getDate() / 7);
+    const monthStr = String(startDateObj.getMonth() + 1).padStart(2, '0');
+
+    const filename = `Task${taskId.value}_${startDateObj.getFullYear()}년${monthStr}월${weekNumber}주차_주간업무요약보고서.docx`;
 
     // 다운로드
     saveAs(blob, filename);
