@@ -1,24 +1,36 @@
+/* 전체 페이지 마진 최소화 */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
 .task-wrapper {
-  padding: 10px;
+  padding: 5px;
   font-family: "Noto Sans KR", sans-serif;
   background: #fff;
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 100vh;
+  width: 100%;
 }
 
 /* 제목 */
 .page-title-box,
 .content {
   width: 100%;
-  max-width: 1200px;
+  max-width: 100%;
   box-sizing: border-box;
 }
 .page-title-box {
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
+  padding: 15px;
+  margin-bottom: 10px;
   text-align: center;
 }
 .page-title {
@@ -30,20 +42,21 @@
 /* 좌우 콘텐츠 */
 .content {
   display: flex;
-  gap: 20px;
+  gap: 10px;
+  width: 100%;
 }
 .left-box {
   flex: 5;
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 20px;
+  padding: 10px;
   background: #fff;
 }
 .right-box {
   flex: 5;
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 20px;
+  padding: 10px;
   background: #fff;
 }
 
@@ -57,7 +70,7 @@
   display: flex;
   justify-content: space-between;
   width: 100%;
-  margin: 20px 0 10px;
+  margin: 10px 0 8px;
 }
 .calendar-header button {
   background: none;
@@ -141,24 +154,92 @@
 
 /* 테이블 */
 .table-container {
-  max-height: 400px;
-  overflow-y: auto;
+  max-height: 500px;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
 }
 .task-table {
   width: 100%;
+  min-width: 800px;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 .task-table th,
 .task-table td {
   border: 1px solid #ddd;
-  padding: 6px;
+  padding: 8px 6px;
   text-align: center;
-  font-size: 14px;
-  height: 30px;
+  font-size: 13px;
+  height: 35px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 컬럼별 너비 조정 */
+.task-table th:nth-child(1),
+.task-table td:nth-child(1) {
+  width: 40px; /* 체크박스 */
+}
+
+.task-table th:nth-child(2),
+.task-table td:nth-child(2) {
+  width: 140px; /* 날짜/시간 */
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.task-table th:nth-child(3),
+.task-table td:nth-child(3) {
+  width: 80px; /* 플랫폼 */
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.task-table th:nth-child(4),
+.task-table td:nth-child(4) {
+  width: 100px; /* 송신자 */
+  font-weight: 500;
+}
+
+.task-table th:nth-child(5),
+.task-table td:nth-child(5) {
+  width: 100px; /* 수신자 */
+  font-weight: 500;
+}
+
+.task-table th:nth-child(6),
+.task-table td:nth-child(6) {
+  width: auto; /* 내용 - 나머지 공간 사용 */
+  text-align: left;
+  white-space: normal;
+  word-wrap: break-word;
 }
 .task-table th {
   background: #2d7ff9;
   color: #fff;
   position: sticky;
   top: 0;
+}
+
+/* 로딩 및 오류 메시지 */
+.loading-message {
+  color: #007bff;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.error-message {
+  color: #dc3545;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.no-data {
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  padding: 20px;
 }

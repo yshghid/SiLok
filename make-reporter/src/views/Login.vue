@@ -23,6 +23,15 @@ const onLogin = async () => {
       password: loginPw.value,
     });
     if (res.data.success) {
+      // 로그인한 사용자 정보를 localStorage에 저장
+      const userInfo = {
+        id: res.data.user.id,
+        name: res.data.user.name,
+        email: res.data.user.email,
+        password: loginPw.value // 실제로는 저장하지 않는 것이 좋지만 테스트용
+      };
+      localStorage.setItem('userInfo', JSON.stringify(userInfo));
+      console.log('로그인된 사용자 정보:', userInfo);
       router.push("/tasks");
     }
   } catch (err) {

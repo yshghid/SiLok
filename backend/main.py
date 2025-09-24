@@ -3,12 +3,16 @@ from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import database, models, schemas
+from backend.user_timeline_api import router as timeline_router
 
+# DB 초기화 (데이터베이스가 사용 가능할 때만)
+try:
+    models.Base.metadata.create_all(bind=database.engine)
+except Exception as e:
+    print(f"데이터베이스 초기화 실패: {e}")
+    print("데이터베이스가 없어도 API는 실행됩니다.")
 
-# DB 초기화
-models.Base.metadata.create_all(bind=database.engine)
-
-app = FastAPI()
+app = FastAPI(title="Weekly Report Generator API")
 
 # Vue 프론트엔드 (Vite 기본 포트) 허용
 app.add_middleware(
@@ -19,6 +23,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# User Timeline API 라우터 포함
+app.include_router(timeline_router, prefix="/api", tags=["User Timeline"])
+
 def get_db():
     db = database.SessionLocal()
     try:
@@ -26,7 +33,7 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/signup", response_model=schemas.EmployeeOut)
+@app.post("/signup", response_model=schemas.EmployeeOut, tags=["Authentication"])
 def signup(user: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.Employee).filter(models.Employee.email == user.email).first()
     if db_user:
@@ -37,7 +44,7 @@ def signup(user: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
-@app.post("/login")
+@app.post("/login", tags=["Authentication"])
 def login(user: schemas.EmployeeLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.Employee).filter(
         models.Employee.email == user.email,
