@@ -35,15 +35,19 @@
             <button class="auth-btn" @click="filterTasks">업무 리스트업</button>
             <button class="auth-btn" @click="resetTasks">리스트 초기화</button>
             <button class="auth-btn" @click="generateReport">보고서 생성</button>
+            <button class="auth-btn" @click="logout" style="background-color: #dc3545;">로그아웃</button>
           </div>
         </div>
 
         <!-- 안내문 -->
         <div class="task-info">
-          <span v-if="startDate && endDate">
+          <div v-if="!userInfo" class="error-message">로그인이 필요합니다.</div>
+          <span v-else-if="startDate && endDate">
             {{ userName }}님의
             {{ formatDate(startDate) }} ~ {{ formatDate(endDate) }} 의 업무 내용입니다.
           </span>
+          <div v-if="loading" class="loading-message">데이터를 불러오는 중...</div>
+          <div v-if="error" class="error-message">{{ error }}</div>
         </div>
 
         <!-- 업무 테이블 -->
@@ -62,6 +66,9 @@
               </tr>
             </thead>
             <tbody>
+              <tr v-if="filteredTasks.length === 0 && !loading">
+                <td colspan="6" class="no-data">선택한 기간에 데이터가 없습니다.</td>
+              </tr>
               <tr v-for="(task, idx) in displayedTasks" :key="idx">
                 <td>
                   <input type="checkbox" v-model="task.checked" v-if="task.datetime" />
@@ -87,10 +94,33 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import "../styles/tasklist.css";
 
-const userName = "범준";
+// 로그인한 사용자 정보
+const userInfo = ref(null);
+const userName = ref("");
+const userEmail = ref("");
+
+// localStorage에서 사용자 정보 가져오기
+const loadUserInfo = () => {
+  const storedUserInfo = localStorage.getItem('userInfo');
+  if (storedUserInfo) {
+    userInfo.value = JSON.parse(storedUserInfo);
+    userName.value = userInfo.value.name;
+    userEmail.value = userInfo.value.email;
+    console.log('TaskList에서 로드된 사용자 정보:', userInfo.value);
+  } else {
+    // 로그인 정보가 없으면 로그인 페이지로 리다이렉트
+    console.log('로그인 정보가 없습니다. 로그인 페이지로 이동합니다.');
+    // router.push('/');
+  }
+};
+
+// 컴포넌트 마운트 시 사용자 정보 로드
+onMounted(() => {
+  loadUserInfo();
+});
 
 // 현재 월/연도
 const today = new Date();
@@ -173,31 +203,118 @@ const nextMonth = () => {
   }
 };
 
-// 더미 업무 데이터
-const tasks = ref([
-  { datetime: "2025-09-15 09:00", platform: "이메일", sender: "김대리", receiver: "범준", content: "주간 보고서 송부", checked: false },
-  { datetime: "2025-09-16 14:00", platform: "메신저", sender: "박과장", receiver: "범준", content: "회의 일정 조율", checked: false },
-  { datetime: "2025-09-18 16:30", platform: "시스템", sender: "자동알림", receiver: "범준", content: "서버 점검 완료", checked: false },
-    { datetime: "2025-09-15 09:00", platform: "이메일", sender: "김대리", receiver: "범준", content: "주간 보고서 송부", checked: false },
-  { datetime: "2025-09-16 14:00", platform: "메신저", sender: "박과장", receiver: "범준", content: "회의 일정 조율", checked: false },
-  { datetime: "2025-09-18 16:30", platform: "시스템", sender: "자동알림", receiver: "범준", content: "서버 점검 완료", checked: false },
-    { datetime: "2025-09-15 09:00", platform: "이메일", sender: "김대리", receiver: "범준", content: "주간 보고서 송부", checked: false },
-  { datetime: "2025-09-16 14:00", platform: "메신저", sender: "박과장", receiver: "범준", content: "회의 일정 조율", checked: false },
-  { datetime: "2025-09-18 16:30", platform: "시스템", sender: "자동알림", receiver: "범준", content: "서버 점검 완료", checked: false },
-    { datetime: "2025-09-15 09:00", platform: "이메일", sender: "김대리", receiver: "범준", content: "주간 보고서 송부", checked: false },
-  { datetime: "2025-09-16 14:00", platform: "메신저", sender: "박과장", receiver: "범준", content: "회의 일정 조율", checked: false },
-  { datetime: "2025-09-18 16:30", platform: "시스템", sender: "자동알림", receiver: "범준", content: "서버 점검 완료", checked: false },
-]);
-
+// 실제 업무 데이터 (API에서 가져옴)
+const tasks = ref([]);
 const filteredTasks = ref([]);
 const selectAll = ref(false);
+const loading = ref(false);
+const error = ref(null);
+
+// API 호출 함수
+const fetchUserTimeline = async () => {
+  if (!userInfo.value) {
+    error.value = "로그인이 필요합니다.";
+    return;
+  }
+  
+  if (!startDate.value || !endDate.value) {
+    error.value = "시작일과 종료일을 선택해주세요.";
+    return;
+  }
+
+  loading.value = true;
+  error.value = null;
+
+  try {
+    // POST 요청을 위한 시간 포함 날짜 포맷팅
+    const startDateStr = formatDateTimeForAPI(startDate.value);
+    const endDateStr = formatDateTimeForAPI(endDate.value);
+    
+    const response = await fetch(
+      `http://127.0.0.1:8000/api/user-timeline`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userName.value,
+          start_date: startDateStr,
+          end_date: endDateStr
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`API 호출 실패: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // API 응답을 테이블 형식으로 변환
+    tasks.value = data.activities.map(activity => ({
+      datetime: formatDateTime(activity.timestamp),
+      platform: getPlatformName(activity.source),
+      sender: activity.metadata.sender || activity.metadata.writer || "시스템",
+      receiver: activity.metadata.receiver || activity.metadata.participants || "시스템",
+      content: activity.content,
+      checked: false
+    }));
+    
+    filteredTasks.value = [...tasks.value];
+    
+  } catch (err) {
+    error.value = `데이터를 가져오는 중 오류가 발생했습니다: ${err.message}`;
+    console.error("API 호출 오류:", err);
+  } finally {
+    loading.value = false;
+  }
+};
+
+// API용 날짜 포맷팅 (GET 요청용 - 날짜만)
+const formatDateForAPI = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// API용 날짜시간 포맷팅 (POST 요청용 - 시간 포함)
+const formatDateTimeForAPI = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+};
+
+// 표시용 날짜시간 포맷팅
+const formatDateTime = (timestamp) => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+};
+
+// 플랫폼 이름 변환
+const getPlatformName = (source) => {
+  const platformMap = {
+    'slack': 'Slack',
+    'notion': 'Notion',
+    'onedrive': 'OneDrive',
+    'outlook': 'Outlook'
+  };
+  return platformMap[source] || source;
+};
 
 const filterTasks = () => {
   if (startDate.value && endDate.value) {
-    filteredTasks.value = tasks.value.filter((t) => {
-      const taskDate = new Date(t.datetime);
-      return taskDate >= startDate.value && taskDate <= endDate.value;
-    });
+    fetchUserTimeline();
   }
 };
 
@@ -228,5 +345,28 @@ const formatDate = (date) => {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+};
+
+// 보고서 생성 함수
+const generateReport = () => {
+  const selectedTasks = filteredTasks.value.filter(task => task.checked);
+  if (selectedTasks.length === 0) {
+    alert("보고서에 포함할 업무를 선택해주세요.");
+    return;
+  }
+  
+  // 여기에 보고서 생성 로직 추가
+  console.log("선택된 업무:", selectedTasks);
+  alert(`${selectedTasks.length}개의 업무가 선택되었습니다. 보고서 생성 기능은 추후 구현됩니다.`);
+};
+
+// 로그아웃 함수
+const logout = () => {
+  localStorage.removeItem('userInfo');
+  userInfo.value = null;
+  userName.value = "";
+  userEmail.value = "";
+  console.log('로그아웃되었습니다.');
+  // router.push('/');
 };
 </script>
