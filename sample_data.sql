@@ -139,7 +139,7 @@ CREATE TABLE public.employee (
     id SERIAL PRIMARY KEY,
     name varchar(50) NOT NULL,
     email varchar(100) NOT NULL UNIQUE,
-    password varchar(255) NOT NULL,
+    password varchar(255) NOT NULL
 );
 
 
@@ -253,7 +253,8 @@ ALTER TABLE public.slack OWNER TO postgres;
 CREATE TABLE public.task (
     id SERIAL PRIMARY KEY,
     task_uuid varchar(50),
-    description text
+    description text,
+    embedding public.vector(1536)
 );
 
 
@@ -469,11 +470,11 @@ COPY public.slack (id, receiver, sender, "timestamp", task_id, content, embeddin
 -- Data for Name: task; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.task (id, task_uuid, description) FROM stdin;
-1	t001	SK하이닉스 스마트 팹 예지보전 플랫폼
-2	t002	현대자동차 디지털 트윈 기반 스마트팩토
-3	t003	신한은행 오픈뱅킹 ERP 연동
-4	t004	카카오브레인 LLM 데이터 파이프라인
+COPY public.task (id, task_uuid, description, embedding) FROM stdin;
+1	t001	SK하이닉스 스마트 팹 예지보전 플랫폼	\N
+2	t002	현대자동차 디지털 트윈 기반 스마트팩토리	\N
+3	t003	신한은행 오픈뱅킹 ERP 연동	\N
+4	t004	카카오브레인 LLM 데이터 파이프라인	\N
 \.
 
 
@@ -481,72 +482,49 @@ COPY public.task (id, task_uuid, description) FROM stdin;
 -- Name: employee employee_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.employee
-    ADD CONSTRAINT employee_email_key UNIQUE (email);
+
 
 
 --
 -- Name: employee employee_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.employee
-    ADD CONSTRAINT employee_pkey PRIMARY KEY (id);
 
 
 --
 -- Name: notion notion_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.notion
-    ADD CONSTRAINT notion_pkey PRIMARY KEY (id);
-
-
 --
 -- Name: onedrive onedrive_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
-
-ALTER TABLE ONLY public.onedrive
-    ADD CONSTRAINT onedrive_pkey PRIMARY KEY (id);
 
 
 --
 -- Name: outlook outlook_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.outlook
-    ADD CONSTRAINT outlook_pkey PRIMARY KEY (id);
-
 
 --
 -- Name: participant participant_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.participant
-    ADD CONSTRAINT participant_pkey PRIMARY KEY (id);
 
 
 --
 -- Name: report report_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.report
-    ADD CONSTRAINT report_pkey PRIMARY KEY (id);
 
 
 --
 -- Name: slack slack_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.slack
-    ADD CONSTRAINT slack_pkey PRIMARY KEY (id);
-
 
 --
 -- Name: task task_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
-
-ALTER TABLE ONLY public.task
-    ADD CONSTRAINT task_pkey PRIMARY KEY (id);
 
 
 --
@@ -578,21 +556,6 @@ CREATE INDEX slack_embedding_idx ON public.slack USING ivfflat (embedding public
 
 ALTER TABLE public.employee
 ADD COLUMN job_grade varchar(50);
-
-
---
--- Add job_grade
---
-
-UPDATE public.employee
-SET job_grade = '매니저';
-
-INSERT INTO public.employee (name, email, password, job_grade)
-VALUES 
-('김민준', 'kimminjun@skax.co.kr', 'default1234', '관리자'),
-('박서연', 'parkseoyeon@skax.co.kr', 'default1234', '관리자'),
-('이수진', 'leesujin@skax.co.kr', 'default1234', '관리자'),
-('최준영', 'choijunyoung@skax.co.kr', 'default1234', '관리자');
 
 --
 -- PostgreSQL database dump complete

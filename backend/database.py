@@ -1,8 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+import dotenv
+import os
+dotenv.load_dotenv()
 
 # PostgreSQL 연결
-DATABASE_URL = "postgresql://postgres:6813@localhost:5432/dump"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

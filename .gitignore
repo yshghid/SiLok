@@ -232,3 +232,6 @@ data/
 conf.d/
 initdb.d/
 bak/
+
+.clade/
+.claude/settings.local.json

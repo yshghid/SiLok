@@ -5,11 +5,12 @@ from typing import List
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.schema.output_parser import StrOutputParser
-from langchain_core.prompts import PromptTemplate
-import fetch_reports
+from langchain_core.prompts import ChatPromptTemplate # PromptTemplate 대신 ChatPromptTemplate 사용
+import psycopg2
 from langchain_openai import ChatOpenAI
 from model.data import ReportRequest, ReportResponse, TimelineActivity, UserTimelineResponse
 from pydantic import BaseModel
+import os
 import dotenv   
 
 dotenv.load_dotenv()
@@ -422,11 +423,50 @@ template = """
 # 관리자용 요약 보고서:
 """
 
-prompt = PromptTemplate.from_template(template)
+prompt = ChatPromptTemplate.from_template(template)
 output_parser = StrOutputParser()
 
 # LangChain 체인 구성
 chain = prompt | llm | output_parser
+
+# DB 연결 정보
+CONNECTION_STRING = os.getenv("DATABASE_URL")
+
+# task_id 값, 시간을 기준으로 모든 사람의 보고서 내용(report 테이블의 content 컬럼)을 가져옴
+def fetch_reports(task_id: int, start_date: str, end_date: str) -> str:
+    """
+    데이터베이스에 접속하여 특정 조건에 맞는 보고서 내용을 가져와 합칩니다.
+    """
+    all_contents = []
+    conn = None # conn 변수 초기화
+    try:
+        conn = psycopg2.connect(CONNECTION_STRING)
+        cur = conn.cursor()
+        
+        cur.execute(
+            """
+            SELECT writer, content FROM report 
+            WHERE %s = task_id AND timestamp::date BETWEEN %s AND %s;
+            """,
+            (task_id, start_date, end_date)
+        )
+        rows = cur.fetchall()
+        print(f"DB 조회 결과: {len(rows)}건")
+        
+        for row in rows:
+            writer, content = row
+            all_contents.append(f"## 작성자: {writer}\n{content}\n")
+        
+    except Exception as e:
+        print(f"DB 접속 중 오류 발생: {e}")
+        # 오류 발생 시 빈 리스트를 반환하도록 예외 처리
+        return ""
+    finally:
+        if conn:
+            cur.close()
+            conn.close()
+            
+    return "---\n".join(all_contents)
 
 @app.post("/api/generate-summary", response_model=ReportResponse)
 async def generate_summary(request: ReportRequest):
@@ -449,12 +489,47 @@ async def generate_summary(request: ReportRequest):
     # 2. LangChain으로 관리자 보고서 생성
     try:
         print("🔄 관리자용 요약 보고서를 생성합니다...")
-        manager_summary = await chain.invoke({"team_reports": team_reports_text})
+        manager_summary = chain.invoke({"team_reports": team_reports_text})
         print("✅ 보고서 생성 완료")
         return ReportResponse(summary=manager_summary)
     except Exception as e:
         print(f"LLM 호출 중 오류 발생: {e}")
         raise HTTPException(status_code=500, detail="보고서 생성 중 오류가 발생했습니다.")
+
+
+from sqlalchemy.orm import Session
+from backend import database, models, schemas
+from backend.user_timeline_api import router as timeline_router
+# User Timeline API 라우터 포함
+app.include_router(timeline_router, prefix="/api", tags=["User Timeline"])
+
+def get_db():
+    db = database.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.post("/signup", response_model=schemas.EmployeeOut, tags=["Authentication"])
+def signup(user: schemas.EmployeeCreate, db: Session = Depends(get_db)):
+    db_user = db.query(models.Employee).filter(models.Employee.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
+    new_user = models.Employee(name=user.name, email=user.email, password=user.password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+@app.post("/login", tags=["Authentication"])
+def login(user: schemas.EmployeeLogin, db: Session = Depends(get_db)):
+    db_user = db.query(models.Employee).filter(
+        models.Employee.email == user.email,
+        models.Employee.password == user.password
+    ).first()
+    if not db_user:
+        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+    return {"success": True, "user": {"id": db_user.id, "name": db_user.name, "email": db_user.email}}
 
 # 사용 예시
 if __name__ == "__main__":

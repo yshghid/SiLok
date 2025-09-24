@@ -506,7 +506,7 @@ GET /api/db-health
 python user_timeline_api.py
 
 📱 Swagger UI:
-http://localhost:8000/docs
+http://localhost:8001/docs
 
 ⚠️ 주의사항:
 - 포트 8001 사용 (기존 API와 구분)
