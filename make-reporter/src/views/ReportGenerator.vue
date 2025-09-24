@@ -265,6 +265,38 @@ const generateReport = async () => {
   }
 };
 
+// 마크다운 문법 제거 함수
+const removeMarkdown = (text) => {
+  return text
+    // 제목 (#, ##, ###)
+    .replace(/^#{1,6}\s+/gm, '')
+    // 굵은 글씨 (**text**, __text__)
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    // 기울임 (*text*, _text_)
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    // 코드 블록 (```code```)
+    .replace(/```[\s\S]*?```/g, '')
+    // 인라인 코드 (`code`)
+    .replace(/`([^`]+)`/g, '$1')
+    // 링크 [text](url)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // 이미지 ![alt](url)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    // 목록 (-, *, +)
+    .replace(/^[\s]*[-\*\+]\s+/gm, '• ')
+    // 숫자 목록
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // 인용문 (>)
+    .replace(/^>\s+/gm, '')
+    // 수평선 (---, ***)
+    .replace(/^[-\*]{3,}$/gm, '─────────────────────────')
+    // 여러 개의 연속된 공백을 하나로
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 // Word 파일 다운로드 기능
 const downloadAsWord = async () => {
   if (!reportText.value) return;
@@ -273,6 +305,9 @@ const downloadAsWord = async () => {
     // 날짜 정보
     const dateInfo = formatDateForDisplay(startDate.value);
     const endDateInfo = formatDateForDisplay(endDate.value);
+
+    // 마크다운 제거된 텍스트
+    const cleanText = removeMarkdown(reportText.value);
 
     // Word 문서 생성
     const doc = new Document({
@@ -305,15 +340,28 @@ const downloadAsWord = async () => {
           }),
 
           // 구분선
-          new Paragraph({ children: [new TextRun("---")] }),
+          new Paragraph({ children: [new TextRun("─────────────────────────")] }),
           new Paragraph({ children: [new TextRun("")] }),
 
-          // 보고서 내용 (마크다운을 텍스트로)
-          ...reportText.value.split('\n').map(line =>
-            new Paragraph({
-              children: [new TextRun(line)]
-            })
-          )
+          // 보고서 내용 (마크다운 제거된 텍스트)
+          ...cleanText.split('\n').map(line => {
+            // 빈 줄 처리
+            if (line.trim() === '') {
+              return new Paragraph({ children: [new TextRun("")] });
+            }
+
+            // 제목처럼 보이는 줄 (대문자로 시작하고 끝에 :가 있는 경우) 굵게 처리
+            if (line.match(/^[A-Z가-힣][^:]*:?\s*$/) || line.includes('##') || line.includes('**')) {
+              return new Paragraph({
+                children: [new TextRun({ text: line, bold: true })]
+              });
+            }
+
+            // 일반 텍스트
+            return new Paragraph({
+              children: [new TextRun({ text: line })]
+            });
+          })
         ],
       }],
     });
