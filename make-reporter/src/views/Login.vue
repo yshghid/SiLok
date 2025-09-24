@@ -18,7 +18,7 @@ const signUpPw = ref("");
 // 로그인
 const onLogin = async () => {
   try {
-    const res = await axios.post("http://127.0.0.1:8000/login", {
+    const res = await axios.post("http://127.0.0.1:8001/login", {
       email: loginEmail.value,
       password: loginPw.value,
     });
@@ -32,7 +32,11 @@ const onLogin = async () => {
       };
       localStorage.setItem('userInfo', JSON.stringify(userInfo));
       console.log('로그인된 사용자 정보:', userInfo);
-      router.push("/tasks");
+      if (res.data.user.id == "5") {
+        router.push("/report-generator")
+      } else {
+        router.push("/tasks");
+      }
     }
   } catch (err) {
     alert(err.response?.data?.detail || "로그인 실패");
@@ -42,7 +46,7 @@ const onLogin = async () => {
 // 회원가입
 const onSignUp = async () => {
   try {
-    await axios.post("http://127.0.0.1:8000/signup", {
+    await axios.post("http://127.0.0.1:8001/signup", {
       name: signUpName.value,
       email: signUpEmail.value,
       password: signUpPw.value,

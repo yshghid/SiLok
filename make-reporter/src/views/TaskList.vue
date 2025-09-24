@@ -231,7 +231,7 @@ const fetchUserTimeline = async () => {
     const endDateStr = formatDateTimeForAPI(endDate.value);
     
     const response = await fetch(
-      `http://127.0.0.1:8000/api/user-timeline`,
+      `http://127.0.0.1:8001/api/user-timeline`,
       {
         method: 'POST',
         headers: {
