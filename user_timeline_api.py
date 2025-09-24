@@ -1,600 +1,390 @@
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from typing import List
+from typing import List, Dict, Any
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
+from langchain.schema import Document
 from langchain.schema.output_parser import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate # PromptTemplate 대신 ChatPromptTemplate 사용
-import psycopg2
+from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from model.data import ReportRequest, ReportResponse, TimelineActivity, UserTimelineResponse
 from pydantic import BaseModel
+import dotenv
 import os
-import dotenv   
+from passlib.context import CryptContext
 
+# ====================================
+# 환경 변수 로드
+# ====================================
 dotenv.load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-app = FastAPI()
+if not DATABASE_URL:
+    raise ValueError("❌ DATABASE_URL 환경 변수가 설정되지 않았습니다.")
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# 데이터베이스 연결 설정 (로컬 PostgreSQL)
-DATABASE_URL = "postgresql+asyncpg://postgres:1234@localhost:5432/weekly_report_db"
-engine = create_async_engine(DATABASE_URL)
-async_session = async_sessionmaker(engine, class_=AsyncSession)
+# ====================================
+# FastAPI app
+# ====================================
+app = FastAPI(title="User Timeline + Weekly Report Service", version="1.0")
 
-# 데이터베이스 세션 의존성
-async def get_db_session():
-    async with async_session() as session:
-        yield session
-
-async def get_user_slack_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
-    """사용자별 Slack 메시지 데이터 조회"""
-    # 문자열을 date 객체로 변환
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    query = text("""
-        SELECT
-            s.id,
-            s.content,
-            s.receiver,
-            s.sender,
-            s.task_id,
-            s."timestamp"::text as timestamp
-        FROM public.slack s
-        WHERE (s.sender = :user_id OR s.receiver = :user_id)
-            AND DATE(s."timestamp") BETWEEN :start_date AND :end_date
-        ORDER BY s."timestamp" DESC
-    """)
-
-    result = await session.execute(
-        query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
-
-    activities = []
-    for row in result.fetchall():
-        row_dict = dict(row._mapping)
-        activities.append(TimelineActivity(
-            source="slack",
-            timestamp=row_dict["timestamp"],
-            content=row_dict["content"],
-            metadata={
-                "sender": row_dict["sender"],
-                "receiver": row_dict["receiver"],
-                "task_id": row_dict["task_id"],
-                "slack_id": row_dict["id"]
-            }
-        ))
-
-    return activities
-
-async def get_user_notion_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
-    """사용자별 Notion 데이터 조회 (participant 테이블과 조인)"""
-    # 문자열을 date 객체로 변환
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    query = text("""
-        SELECT
-            n.id,
-            n.content,
-            n.participant_id,
-            n.task_id,
-            n."timestamp"::text as timestamp,
-            COALESCE(
-                ARRAY_TO_STRING(
-                    ARRAY_REMOVE(
-                        ARRAY[p.p1, p.p2, p.p3, p.p4, p.p5, p.p6],
-                        NULL
-                    ), ', '
-                ), ''
-            ) as participants
-        FROM public.notion n
-        LEFT JOIN public.participant p ON p.notion_id = n.id
-        WHERE EXISTS (
-            SELECT 1 FROM public.participant p2
-            WHERE p2.notion_id = n.id
-            AND :user_id IN (p2.p1, p2.p2, p2.p3, p2.p4, p2.p5, p2.p6)
-        )
-        AND DATE(n."timestamp") BETWEEN :start_date AND :end_date
-        ORDER BY n."timestamp" DESC
-    """)
-
-    result = await session.execute(
-        query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
-
-    activities = []
-    for row in result.fetchall():
-        row_dict = dict(row._mapping)
-        activities.append(TimelineActivity(
-            source="notion",
-            timestamp=row_dict["timestamp"],
-            content=row_dict["content"],
-            metadata={
-                "participant_id": row_dict["participant_id"],
-                "participants": row_dict["participants"],
-                "task_id": row_dict["task_id"],
-                "notion_id": row_dict["id"]
-            }
-        ))
-
-    return activities
-
-async def get_user_onedrive_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
-    """사용자별 OneDrive 데이터 조회"""
-    # 문자열을 date 객체로 변환
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    query = text("""
-        SELECT
-            od.id,
-            od.content,
-            od.writer,
-            od.task_id,
-            od."timestamp"::text as timestamp
-        FROM public.onedrive od
-        WHERE od.writer = :user_id
-            AND DATE(od."timestamp") BETWEEN :start_date AND :end_date
-        ORDER BY od."timestamp" DESC
-    """)
-
-    result = await session.execute(
-        query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
-
-    activities = []
-    for row in result.fetchall():
-        row_dict = dict(row._mapping)
-        # content에서 파일명 추출 시도
-        file_name = "Unknown File"
-        content = row_dict["content"] or ""
-        if "문서명:" in content:
-            try:
-                file_name = content.split("문서명:")[1].split("\n")[0].strip()
-            except:
-                pass
-
-        activities.append(TimelineActivity(
-            source="onedrive",
-            timestamp=row_dict["timestamp"],
-            content=row_dict["content"],
-            metadata={
-                "writer": row_dict["writer"],
-                "file_name": file_name,
-                "task_id": row_dict["task_id"],
-                "onedrive_id": row_dict["id"]
-            }
-        ))
-
-    return activities
-
-async def get_user_outlook_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
-    """사용자별 Outlook 데이터 조회"""
-    # 문자열을 date 객체로 변환
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    query = text("""
-        SELECT
-            o.id,
-            o.content,
-            o.sender,
-            o.receiver,
-            o.task_id,
-            o."timestamp"::text as timestamp
-        FROM public.outlook o
-        WHERE (o.sender = :user_id OR o.receiver = :user_id)
-            AND DATE(o."timestamp") BETWEEN :start_date AND :end_date
-        ORDER BY o."timestamp" DESC
-    """)
-
-    result = await session.execute(
-        query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
-
-    activities = []
-    for row in result.fetchall():
-        row_dict = dict(row._mapping)
-        # content에서 제목 추출 시도
-        subject = "No Subject"
-        content = row_dict["content"] or ""
-        if "제목:" in content:
-            try:
-                subject = content.split("제목:")[1].split("\n")[0].strip()
-            except:
-                pass
-
-        activities.append(TimelineActivity(
-            source="outlook",
-            timestamp=row_dict["timestamp"],
-            content=row_dict["content"],
-            metadata={
-                "sender": row_dict["sender"],
-                "receiver": row_dict["receiver"],
-                "subject": subject,
-                "task_id": row_dict["task_id"],
-                "outlook_id": row_dict["id"]
-            }
-        ))
-
-    return activities
-
-@app.get("/api/user-timeline/{user_id}", response_model=UserTimelineResponse)
-async def get_user_timeline(
-    user_id: str,
-    start_date: str = Query(..., description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="종료 날짜 (YYYY-MM-DD)"),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """
-    특정 사용자의 모든 활동 데이터를 시간순으로 통합 조회합니다.
-
-    - **user_id**: 사용자 이름 (예: 서은수, 윤소현, 박현규 등)
-    - **start_date**: 조회 시작 날짜
-    - **end_date**: 조회 종료 날짜
-
-    Returns:
-    - 시간순으로 정렬된 모든 활동 데이터 (Slack, Notion, OneDrive, Outlook)
-    """
-
-    try:
-        # 4개 데이터 소스를 순차적으로 조회 (세션 충돌 방지)
-        slack_data = await get_user_slack_data(user_id, start_date, end_date, session)
-        notion_data = await get_user_notion_data(user_id, start_date, end_date, session)
-        onedrive_data = await get_user_onedrive_data(user_id, start_date, end_date, session)
-        outlook_data = await get_user_outlook_data(user_id, start_date, end_date, session)
-
-        # 모든 활동을 하나의 리스트로 통합
-        all_activities = []
-        all_activities.extend(slack_data)
-        all_activities.extend(notion_data)
-        all_activities.extend(onedrive_data)
-        all_activities.extend(outlook_data)
-
-        # 시간순 정렬 (최신순)
-        all_activities.sort(key=lambda x: x.timestamp, reverse=True)
-
-        return UserTimelineResponse(
-            user_id=user_id,
-            start_date=start_date,
-            end_date=end_date,
-            activities=all_activities,
-            summary={
-                "total_count": len(all_activities),
-                "slack_count": len(slack_data),
-                "notion_count": len(notion_data),
-                "onedrive_count": len(onedrive_data),
-                "outlook_count": len(outlook_data)
-            }
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"데이터 조회 중 오류가 발생했습니다: {str(e)}")
-
-@app.get("/api/user-summary/{user_id}")
-async def get_user_activity_summary(
-    user_id: str,
-    start_date: str = Query(..., description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: str = Query(..., description="종료 날짜 (YYYY-MM-DD)"),
-    session: AsyncSession = Depends(get_db_session)
-):
-    """사용자별 활동 요약 정보 조회"""
-    # 문자열을 date 객체로 변환
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    # 각 소스별 건수만 조회하는 가벼운 쿼리
-    summary_query = text("""
-        SELECT
-            (SELECT COUNT(*) FROM public.slack
-             WHERE (sender = :user_id OR receiver = :user_id)
-             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as slack_count,
-
-            (SELECT COUNT(*) FROM public.notion n
-             WHERE EXISTS (
-                 SELECT 1 FROM public.participant p
-                 WHERE p.notion_id = n.id
-                 AND :user_id IN (p.p1, p.p2, p.p3, p.p4, p.p5, p.p6)
-             ) AND DATE(n."timestamp") BETWEEN :start_date AND :end_date) as notion_count,
-
-            (SELECT COUNT(*) FROM public.onedrive
-             WHERE writer = :user_id
-             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as onedrive_count,
-
-            (SELECT COUNT(*) FROM public.outlook
-             WHERE (sender = :user_id OR receiver = :user_id)
-             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as outlook_count
-    """)
-
-    result = await session.execute(
-        summary_query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
-
-    row = result.fetchone()
-    if row:
-        row_dict = dict(row._mapping)
-        row_dict['total_count'] = sum(row_dict.values())
-        row_dict['user_id'] = user_id
-        return row_dict
-    else:
-        return {
-            "user_id": user_id,
-            "slack_count": 0,
-            "notion_count": 0,
-            "onedrive_count": 0,
-            "outlook_count": 0,
-            "total_count": 0
-        }
-
-@app.get("/api/users")
-async def get_available_users(session: AsyncSession = Depends(get_db_session)):
-    """사용 가능한 사용자 목록 조회"""
-    try:
-        query = text("""
-            SELECT DISTINCT name FROM public.employee ORDER BY name
-        """)
-
-        result = await session.execute(query)
-        users = [row[0] for row in result.fetchall()]
-
-        return {
-            "users": users,
-            "count": len(users)
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"사용자 목록 조회 오류: {str(e)}")
-
-@app.get("/health")
-async def health_check():
-    """서버 상태 확인"""
-    return {"status": "healthy", "message": "사용자 타임라인 API 서버가 정상 동작 중입니다."}
-
-@app.get("/api/db-health")
-async def database_health_check(session: AsyncSession = Depends(get_db_session)):
-    """데이터베이스 연결 상태 확인"""
-    try:
-        # 각 테이블 존재 여부 확인
-        tables_check = {}
-
-        table_queries = {
-            "slack": "SELECT COUNT(*) FROM public.slack LIMIT 1",
-            "notion": "SELECT COUNT(*) FROM public.notion LIMIT 1",
-            "onedrive": "SELECT COUNT(*) FROM public.onedrive LIMIT 1",
-            "outlook": "SELECT COUNT(*) FROM public.outlook LIMIT 1",
-            "participant": "SELECT COUNT(*) FROM public.participant LIMIT 1",
-            "employee": "SELECT COUNT(*) FROM public.employee LIMIT 1"
-        }
-
-        for table_name, query in table_queries.items():
-            try:
-                result = await session.execute(text(query))
-                count = result.scalar()
-                tables_check[table_name] = {"exists": True, "count": count}
-            except Exception as e:
-                tables_check[table_name] = {"exists": False, "error": str(e)}
-
-        return {
-            "database_status": "connected",
-            "tables": tables_check,
-            "message": "데이터베이스 연결이 정상입니다."
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"데이터베이스 연결 오류: {str(e)}")
-    
-
-# CORS 설정: 프론트엔드(Vue)
-origins = [
-    "http://localhost:5173"
-]
-
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ====================================
+# DB 연결
+# ====================================
+engine = create_async_engine(DATABASE_URL, echo=False)
+async_session = async_sessionmaker(engine, class_=AsyncSession)
 
-# LLM 로드 (OpenAI GPT-4o 사용)
-llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+async def get_db_session():
+    async with async_session() as session:
+        yield session
 
+# ====================================
+# 데이터 모델
+# ====================================
+class TimelineActivity(BaseModel):
+    source: str
+    timestamp: str
+    content: str
+    metadata: Dict[str, Any]
 
-# LangChain 프롬프트 템플릿
-template = """
+class UserTimelineResponse(BaseModel):
+    user_id: str
+    start_date: str
+    end_date: str
+    activities: List[TimelineActivity]
+    summary: Dict[str, Any]
+
+class ReportRequest(BaseModel):
+    task_id: int
+    start_date: str
+    end_date: str
+
+class ReportResponse(BaseModel):
+    summary: str
+
+class ReportIn(BaseModel):
+    platform_ids: Dict[str, List[int]]
+    start: str
+    end: str
+    writer: str
+    email: str
+
+# ====================================
+# 비밀번호 유틸
+# ====================================
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# ====================================
+# 인증용 스키마
+# ====================================
+class EmployeeCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class EmployeeLogin(BaseModel):
+    email: str
+    password: str
+
+class EmployeeOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    class Config:
+        orm_mode = True
+
+# ====================================
+# LLM
+# ====================================
+llm = ChatOpenAI(model="gpt-4o", temperature=0.3, api_key=OPENAI_API_KEY)
+output_parser = StrOutputParser()
+
+manager_prompt = PromptTemplate.from_template("""
 # 역할
 당신은 팀의 성과를 한눈에 파악해야 하는 유능한 팀장입니다.
 
 # 지시
-아래에 제공되는 task별 팀원들의 주간 보고서 내용을 바탕으로, 팀 전체의 관점에서 **핵심 성과, 발견된 문제점, 그리고 다음 주 공통 목표**를 요약하여 관리자용 보고서를 작성해 주세요.
+아래에 task별 팀원들의 주간 보고서를 바탕으로, 
+**핵심 성과 / 문제점 / 다음 주 공통 목표**를 요약하세요.
 
 # 팀원별 보고 내용
 {team_reports}
 
-# 관리자용 요약 보고서:
+# 관리자 요약 보고서:
+""")
+manager_chain = manager_prompt | llm | output_parser
+
+REPORT_TEMPLATE = """
+## 1) 주간 요약
+Task {task_id} ({task_description}) 관련 진행 상황 요약:
+{context}
+
+## 2) 사람별 주요 산출물
+{member_list}
+
+## 3) 협업 내역
+Slack/Notion/Outlook/OneDrive 기록 기반 협업 내역 정리.
+
+## 4) 리스크/이슈
+문제점, 리스크, 해결 필요 사항.
+
+## 5) 차주 계획
+후속 작업 및 개선점.
+
+(기간: {start} ~ {end})
 """
+report_prompt = PromptTemplate(
+    template=REPORT_TEMPLATE,
+    input_variables=["context", "task_id", "task_description", "member_list", "start", "end"],
+)
 
-prompt = ChatPromptTemplate.from_template(template)
-output_parser = StrOutputParser()
+# ====================================
+# 유틸 함수
+# ====================================
+async def get_task_description(task_id: int, session: AsyncSession) -> str:
+    query = text("SELECT description FROM public.task WHERE id = :task_id")
+    result = await session.execute(query, {"task_id": task_id})
+    row = result.fetchone()
+    return row[0] if row else "(설명 없음)"
 
-# LangChain 체인 구성
-chain = prompt | llm | output_parser
+async def insert_report(task_id: int, writer: str, email: str, content: str, session: AsyncSession):
+    now = datetime.utcnow()
+    query = text("""
+        INSERT INTO public.report (task_id, "timestamp", writer, email, content)
+        VALUES (:task_id, :timestamp, :writer, :email, :content)
+    """)
+    await session.execute(query, {
+        "task_id": task_id,
+        "timestamp": now,
+        "writer": writer,
+        "email": email,
+        "content": content
+    })
+    await session.commit()
 
-# DB 연결 정보
-CONNECTION_STRING = os.getenv("DATABASE_URL")
+async def generate_report_for_task(task_id: int, platform_data: List[Dict[str, Any]], start_ts: str, end_ts: str, session: AsyncSession) -> str:
+    docs = [Document(page_content=d.get("content", "")) for d in platform_data]
+    actors = {d.get("actor") for d in platform_data if d.get("actor")}
+    actor_list = "- " + "\n- ".join(actors) if actors else "- (none)"
+    task_description = await get_task_description(task_id, session)
+    context = "\n".join([doc.page_content for doc in docs])
 
-# task_id 값, 시간을 기준으로 모든 사람의 보고서 내용(report 테이블의 content 컬럼)을 가져옴
-def fetch_reports(task_id: int, start_date: str, end_date: str) -> str:
-    """
-    데이터베이스에 접속하여 특정 조건에 맞는 보고서 내용을 가져와 합칩니다.
-    """
-    all_contents = []
-    conn = None # conn 변수 초기화
-    try:
-        conn = psycopg2.connect(CONNECTION_STRING)
-        cur = conn.cursor()
-        
-        cur.execute(
-            """
-            SELECT writer, content FROM report 
-            WHERE %s = task_id AND timestamp::date BETWEEN %s AND %s;
-            """,
-            (task_id, start_date, end_date)
-        )
-        rows = cur.fetchall()
-        print(f"DB 조회 결과: {len(rows)}건")
-        
-        for row in rows:
-            writer, content = row
-            all_contents.append(f"## 작성자: {writer}\n{content}\n")
-        
-    except Exception as e:
-        print(f"DB 접속 중 오류 발생: {e}")
-        # 오류 발생 시 빈 리스트를 반환하도록 예외 처리
-        return ""
-    finally:
-        if conn:
-            cur.close()
-            conn.close()
-            
-    return "---\n".join(all_contents)
+    chain = report_prompt | llm | output_parser
+    body = await chain.ainvoke({
+        "context": context,
+        "task_id": task_id,
+        "task_description": task_description,
+        "member_list": actor_list,
+        "start": start_ts,
+        "end": end_ts,
+    })
+    return f"# 업무 {task_id}: {task_description} 주간 보고서\n\n{body}"
 
-@app.post("/api/generate-summary", response_model=ReportResponse)
-async def generate_summary(request: ReportRequest):
-    """
-    요청받은 task_id와 기간에 해당하는 팀원들의 보고서를 취합하여
-    관리자용 요약 보고서를 생성합니다.
-    """
-    print(f"API 요청 수신: task_id={request.task_id}, 기간={request.start_date}~{request.end_date}")
-    
-    # 1. DB에서 데이터 가져오기
-    team_reports_text = fetch_reports(
-        task_id=request.task_id,
-        start_date=request.start_date,
-        end_date=request.end_date
+# ====================================
+# API 엔드포인트
+# ====================================
+
+# --- 회원가입 ---
+@app.post("/signup", response_model=EmployeeOut, tags=["Authentication"])
+async def signup(user: EmployeeCreate, session: AsyncSession = Depends(get_db_session)):
+    query = text("SELECT id FROM public.employee WHERE email = :email")
+    result = await session.execute(query, {"email": user.email})
+    if result.fetchone():
+        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
+
+    hashed_pw = hash_password(user.password)
+    insert_q = text("""
+        INSERT INTO public.employee (name, email, password)
+        VALUES (:name, :email, :password)
+        RETURNING id, name, email
+    """)
+    res = await session.execute(insert_q, {"name": user.name, "email": user.email, "password": hashed_pw})
+    await session.commit()
+    row = res.fetchone()
+    return {"id": row[0], "name": row[1], "email": row[2]}
+
+# --- 로그인 ---
+@app.post("/login", tags=["Authentication"])
+async def login(user: EmployeeLogin, session: AsyncSession = Depends(get_db_session)):
+    query = text("SELECT id, name, email, password FROM public.employee WHERE email = :email")
+    result = await session.execute(query, {"email": user.email})
+    row = result.fetchone()
+    if not row or not verify_password(user.password, row[3]):
+        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+    return {"success": True, "user": {"id": row[0], "name": row[1], "email": row[2]}}
+
+# --- 타임라인 조회 ---
+@app.get("/api/user-timeline/{email}", response_model=UserTimelineResponse)
+async def get_user_timeline(email: str, start_date: str, end_date: str, session: AsyncSession = Depends(get_db_session)):
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    # 1. email → name 변환
+    q = text("SELECT name FROM public.employee WHERE email = :email")
+    res = await session.execute(q, {"email": email})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자를 찾을 수 없습니다.")
+    user_name = row[0]
+
+    # 2. Slack 조회 (sender/receiver가 user_name인 경우)
+    query = text("""
+        SELECT id, content, sender, receiver, task_id, "timestamp"::text as timestamp
+        FROM public.slack
+        WHERE (sender = :user_name OR receiver = :user_name)
+          AND DATE("timestamp") BETWEEN :start_date AND :end_date
+        ORDER BY "timestamp" DESC
+    """)
+    result = await session.execute(
+        query,
+        {"user_name": user_name, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
-    if not team_reports_text:
-        raise HTTPException(status_code=404, detail="해당 기간/태스크에 대한 보고서가 없습니다.")
+    activities = []
+    for row in result.fetchall():
+        r = dict(row._mapping)
+        activities.append(TimelineActivity(
+            source="slack",
+            timestamp=r["timestamp"],
+            content=r["content"],
+            metadata={
+                "sender": r["sender"],
+                "receiver": r["receiver"],
+                "task_id": r["task_id"],
+                "slack_id": r["id"]
+            }
+        ))
 
-    # 2. LangChain으로 관리자 보고서 생성
+    return UserTimelineResponse(
+        user_id=email,  # 👈 email 기준
+        start_date=start_date,
+        end_date=end_date,
+        activities=activities,
+        summary={"total_count": len(activities), "slack_count": len(activities)}
+    )
+
+
+# --- 활동 요약 ---
+@app.get("/api/user-summary/{email}")
+async def get_user_summary(email: str, start_date: str, end_date: str, session: AsyncSession = Depends(get_db_session)):
+    q = text("SELECT name FROM public.employee WHERE email = :email")
+    res = await session.execute(q, {"email": email})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자를 찾을 수 없습니다.")
+    user_name = row[0]
+
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    query = text("""
+        SELECT COUNT(*) 
+        FROM public.slack
+        WHERE (sender = :user_name OR receiver = :user_name)
+          AND DATE("timestamp") BETWEEN :start_date AND :end_date
+    """)
+    result = await session.execute(query, {"user_name": user_name, "start_date": start_date_obj, "end_date": end_date_obj})
+    count = result.scalar()
+    return {"email": email, "user_name": user_name, "total_count": count}
+
+# --- 사용자 목록 ---
+@app.get("/api/users")
+async def get_available_users(session: AsyncSession = Depends(get_db_session)):
+    query = text("SELECT DISTINCT name FROM public.employee ORDER BY name")
+    result = await session.execute(query)
+    users = [row[0] for row in result.fetchall()]
+    return {"users": users, "count": len(users)}
+
+# --- DB health ---
+@app.get("/api/db-health")
+async def db_health(session: AsyncSession = Depends(get_db_session)):
     try:
-        print("🔄 관리자용 요약 보고서를 생성합니다...")
-        manager_summary = chain.invoke({"team_reports": team_reports_text})
-        print("✅ 보고서 생성 완료")
-        return ReportResponse(summary=manager_summary)
+        result = await session.execute(text("SELECT 1"))
+        return {"database_status": "connected", "result": result.scalar()}
     except Exception as e:
-        print(f"LLM 호출 중 오류 발생: {e}")
-        raise HTTPException(status_code=500, detail="보고서 생성 중 오류가 발생했습니다.")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 서비스 health ---
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+# --- 요약 생성 ---
+@app.post("/api/generate-summary", response_model=ReportResponse)
+async def generate_summary(request: ReportRequest):
+    dummy_reports = f"Task {request.task_id} 보고서 (기간 {request.start_date}~{request.end_date})"
+    manager_summary = await manager_chain.ainvoke({"team_reports": dummy_reports})
+    return ReportResponse(summary=manager_summary)
+
+# --- 주간 보고서 생성 ---
+@app.post("/reports/weekly")
+async def make_weekly_report(p: ReportIn, session: AsyncSession = Depends(get_db_session)):
+    reports = []
+
+    # 1. 모든 플랫폼 데이터 수집
+    all_platform_data = []
+    for platform, ids in p.platform_ids.items():
+        if not ids:
+            continue
+
+        query = None
+        if platform == "slack":
+            query = text("SELECT id, content, sender AS actor, receiver, task_id, \"timestamp\"::text as ts FROM public.slack WHERE id = ANY(:ids)")
+        elif platform == "notion":
+            query = text("SELECT id, content, NULL as actor, task_id, \"timestamp\"::text as ts FROM public.notion WHERE id = ANY(:ids)")
+        elif platform == "outlook":
+            query = text("SELECT id, content, sender AS actor, receiver, task_id, \"timestamp\"::text as ts FROM public.outlook WHERE id = ANY(:ids)")
+        elif platform == "onedrive":
+            query = text("SELECT id, content, writer AS actor, task_id, \"timestamp\"::text as ts FROM public.onedrive WHERE id = ANY(:ids)")
+
+        # ✅ 여기 수정됨
+        if query is not None:
+            result = await session.execute(query, {"ids": ids})
+            rows = [dict(r._mapping) for r in result.fetchall()]
+            all_platform_data.extend(rows)
+
+    # 2. task_id별 그룹핑
+    grouped = {}
+    for d in all_platform_data:
+        task_id = d.get("task_id")
+        if not task_id:
+            continue
+        grouped.setdefault(task_id, []).append(d)
+
+    # 3. 보고서 생성
+    for task_id, items in grouped.items():
+        task_id_int = int(task_id)
+        report_md = await generate_report_for_task(task_id_int, items, p.start, p.end, session)
+        await insert_report(task_id_int, p.writer, p.email, report_md, session)
+        reports.append({"task_id": task_id_int, "report": report_md})
+
+    return {
+        "platform_ids": p.platform_ids,
+        "range": {"start": p.start, "end": p.end},
+        "reports": reports
+    }
 
 
-from sqlalchemy.orm import Session
-from backend import database, models, schemas
-from backend.user_timeline_api import router as timeline_router
-# User Timeline API 라우터 포함
-app.include_router(timeline_router, prefix="/api", tags=["User Timeline"])
-
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-@app.post("/signup", response_model=schemas.EmployeeOut, tags=["Authentication"])
-def signup(user: schemas.EmployeeCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.Employee).filter(models.Employee.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
-    new_user = models.Employee(name=user.name, email=user.email, password=user.password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
-@app.post("/login", tags=["Authentication"])
-def login(user: schemas.EmployeeLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.Employee).filter(
-        models.Employee.email == user.email,
-        models.Employee.password == user.password
-    ).first()
-    if not db_user:
-        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
-    return {"success": True, "user": {"id": db_user.id, "name": db_user.name, "email": db_user.email}}
-
-# 사용 예시
+# ====================================
+# 실행
+# ====================================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
-
-"""
-🚀 사용자 타임라인 API 사용 예시:
-
-📋 주요 기능:
-- user_id 기반으로 모든 테이블 검색
-- 시간순 통합 타임라인 제공
-- 병렬 쿼리로 성능 최적화
-- 메타데이터 구조화
-
-🔍 사용 예시:
-
-1. 특정 사용자의 모든 활동 조회:
-GET /api/user-timeline/서은수?start_date=2025-09-22T00:00:00&end_date=2025-09-26T23:59:59
-
-2. 사용자별 활동 요약:
-GET /api/user-summary/윤소현?start_date=2025-09-22T00:00:00&end_date=2025-09-26T23:59:59
-
-3. 사용 가능한 사용자 목록:
-GET /api/users
-
-4. 서버 상태 확인:
-GET /health
-
-5. 데이터베이스 연결 확인:
-GET /api/db-health
-
-📊 응답 예시:
-{
-  "user_id": "서은수",
-  "start_date": "2025-09-22T00:00:00",
-  "end_date": "2025-09-26T23:59:59",
-  "activities": [
-    {
-      "source": "slack",
-      "timestamp": "2025-09-26T17:20:45",
-      "content": "이번 주 마감!...",
-      "metadata": {
-        "sender": "박현규",
-        "receiver": "윤소현"
-      }
-    }
-  ],
-  "summary": {
-    "total_count": 45,
-    "slack_count": 30,
-    "notion_count": 4,
-    "onedrive_count": 4,
-    "outlook_count": 7
-  }
-}
-
-🏃‍♂️ 실행 방법:
-python user_timeline_api.py
-
-📱 Swagger UI:
-http://localhost:8001/docs
-
-⚠️ 주의사항:
-- 포트 8001 사용 (기존 API와 구분)
-- DATABASE_URL을 본인 환경에 맞게 수정
-- 한글 사용자명 지원
-"""
+    uvicorn.run(app, host="0.0.0.0", port=8001, reload=True)
