@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from typing import List, Dict, Any
@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 import dotenv
 import os
+from passlib.context import CryptContext
 
 # ====================================
 # 환경 변수 로드
@@ -71,54 +72,75 @@ class ReportIn(BaseModel):
     email: str
 
 # ====================================
+# 비밀번호 유틸
+# ====================================
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+# ====================================
+# 인증용 스키마
+# ====================================
+class EmployeeCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class EmployeeLogin(BaseModel):
+    email: str
+    password: str
+
+class EmployeeOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    class Config:
+        orm_mode = True
+
+# ====================================
 # LLM
 # ====================================
 llm = ChatOpenAI(model="gpt-4o", temperature=0.3, api_key=OPENAI_API_KEY)
 output_parser = StrOutputParser()
 
-# 관리자 요약 보고서 프롬프트
 manager_prompt = PromptTemplate.from_template("""
 # 역할
 당신은 팀의 성과를 한눈에 파악해야 하는 유능한 팀장입니다.
 
 # 지시
-아래에 제공되는 task별 팀원들의 주간 보고서 내용을 바탕으로, 팀 전체의 관점에서 **핵심 성과, 발견된 문제점, 그리고 다음 주 공통 목표**를 요약하여 관리자용 보고서를 작성해 주세요.
+아래에 task별 팀원들의 주간 보고서를 바탕으로, 
+**핵심 성과 / 문제점 / 다음 주 공통 목표**를 요약하세요.
 
 # 팀원별 보고 내용
 {team_reports}
 
-# 관리자용 요약 보고서:
+# 관리자 요약 보고서:
 """)
-
 manager_chain = manager_prompt | llm | output_parser
 
-# 주간 업무 보고서 프롬프트
 REPORT_TEMPLATE = """
-## 작성 지침
-- 반드시 아래 제공된 context와 task_description만을 근거로 작성하세요.
-- 제공되지 않은 사실은 추측하거나 임의로 작성하지 마세요.
-- context가 부족하면 '자료 없음'이라고 명시하세요.
-
 ## 1) 주간 요약
-이번 주 task {task_id} ({task_description}) 관련 진행 상황과 핵심 논의를 요약하세요.
+Task {task_id} ({task_description}) 관련 진행 상황 요약:
 {context}
 
 ## 2) 사람별 주요 산출물
-다음은 참여자의 주요 산출물입니다:
 {member_list}
 
 ## 3) 협업 내역
-Slack/Notion/Outlook/OneDrive 기록을 바탕으로 어떤 사람들이 어떤 방식으로 협업했는지 구체적으로 정리하세요.
+Slack/Notion/Outlook/OneDrive 기록 기반 협업 내역 정리.
 
 ## 4) 리스크/이슈
-대화와 회의록에서 드러난 문제점, 잠재 리스크, 해결 필요 사항을 정리하세요.
+문제점, 리스크, 해결 필요 사항.
 
 ## 5) 차주 계획
-다음 주에 진행해야 할 후속 작업과 개선점을 제시하세요.
+후속 작업 및 개선점.
 
 (기간: {start} ~ {end})
 """
-
 report_prompt = PromptTemplate(
     template=REPORT_TEMPLATE,
     input_variables=["context", "task_id", "task_description", "member_list", "start", "end"],
@@ -153,8 +175,8 @@ async def generate_report_for_task(task_id: int, platform_data: List[Dict[str, A
     actors = {d.get("actor") for d in platform_data if d.get("actor")}
     actor_list = "- " + "\n- ".join(actors) if actors else "- (none)"
     task_description = await get_task_description(task_id, session)
-
     context = "\n".join([doc.page_content for doc in docs])
+
     chain = report_prompt | llm | output_parser
     body = await chain.ainvoke({
         "context": context,
@@ -164,82 +186,116 @@ async def generate_report_for_task(task_id: int, platform_data: List[Dict[str, A
         "start": start_ts,
         "end": end_ts,
     })
-
     return f"# 업무 {task_id}: {task_description} 주간 보고서\n\n{body}"
 
 # ====================================
 # API 엔드포인트
 # ====================================
-@app.get("/api/user-timeline/{user_id}", response_model=UserTimelineResponse)
-async def get_user_timeline(
-    user_id: str,
-    start_date: str,
-    end_date: str,
-    session: AsyncSession = Depends(get_db_session)
-):
-    # 문자열 → date 변환
+
+# --- 회원가입 ---
+@app.post("/signup", response_model=EmployeeOut, tags=["Authentication"])
+async def signup(user: EmployeeCreate, session: AsyncSession = Depends(get_db_session)):
+    query = text("SELECT id FROM public.employee WHERE email = :email")
+    result = await session.execute(query, {"email": user.email})
+    if result.fetchone():
+        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
+
+    hashed_pw = hash_password(user.password)
+    insert_q = text("""
+        INSERT INTO public.employee (name, email, password)
+        VALUES (:name, :email, :password)
+        RETURNING id, name, email
+    """)
+    res = await session.execute(insert_q, {"name": user.name, "email": user.email, "password": hashed_pw})
+    await session.commit()
+    row = res.fetchone()
+    return {"id": row[0], "name": row[1], "email": row[2]}
+
+# --- 로그인 ---
+@app.post("/login", tags=["Authentication"])
+async def login(user: EmployeeLogin, session: AsyncSession = Depends(get_db_session)):
+    query = text("SELECT id, name, email, password FROM public.employee WHERE email = :email")
+    result = await session.execute(query, {"email": user.email})
+    row = result.fetchone()
+    if not row or not verify_password(user.password, row[3]):
+        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+    return {"success": True, "user": {"id": row[0], "name": row[1], "email": row[2]}}
+
+# --- 타임라인 조회 ---
+@app.get("/api/user-timeline/{email}", response_model=UserTimelineResponse)
+async def get_user_timeline(email: str, start_date: str, end_date: str, session: AsyncSession = Depends(get_db_session)):
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
 
+    # 1. email → name 변환
+    q = text("SELECT name FROM public.employee WHERE email = :email")
+    res = await session.execute(q, {"email": email})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자를 찾을 수 없습니다.")
+    user_name = row[0]
+
+    # 2. Slack 조회 (sender/receiver가 user_name인 경우)
     query = text("""
         SELECT id, content, sender, receiver, task_id, "timestamp"::text as timestamp
         FROM public.slack
-        WHERE (sender = :user_id OR receiver = :user_id)
+        WHERE (sender = :user_name OR receiver = :user_name)
           AND DATE("timestamp") BETWEEN :start_date AND :end_date
         ORDER BY "timestamp" DESC
     """)
     result = await session.execute(
         query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
+        {"user_name": user_name, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     activities = []
     for row in result.fetchall():
-        row_dict = dict(row._mapping)
+        r = dict(row._mapping)
         activities.append(TimelineActivity(
             source="slack",
-            timestamp=row_dict["timestamp"],
-            content=row_dict["content"],
+            timestamp=r["timestamp"],
+            content=r["content"],
             metadata={
-                "sender": row_dict["sender"],
-                "receiver": row_dict["receiver"],
-                "task_id": row_dict["task_id"],
-                "slack_id": row_dict["id"]
+                "sender": r["sender"],
+                "receiver": r["receiver"],
+                "task_id": r["task_id"],
+                "slack_id": r["id"]
             }
         ))
 
     return UserTimelineResponse(
-        user_id=user_id,
+        user_id=email,  # 👈 email 기준
         start_date=start_date,
         end_date=end_date,
         activities=activities,
         summary={"total_count": len(activities), "slack_count": len(activities)}
     )
 
-@app.get("/api/user-summary/{user_id}")
-async def get_user_summary(
-    user_id: str,
-    start_date: str,
-    end_date: str,
-    session: AsyncSession = Depends(get_db_session)
-):
-    # 문자열 → date 변환
+
+# --- 활동 요약 ---
+@app.get("/api/user-summary/{email}")
+async def get_user_summary(email: str, start_date: str, end_date: str, session: AsyncSession = Depends(get_db_session)):
+    q = text("SELECT name FROM public.employee WHERE email = :email")
+    res = await session.execute(q, {"email": email})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자를 찾을 수 없습니다.")
+    user_name = row[0]
+
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     query = text("""
-        SELECT COUNT(*) FROM public.slack
-        WHERE (sender = :user_id OR receiver = :user_id)
+        SELECT COUNT(*) 
+        FROM public.slack
+        WHERE (sender = :user_name OR receiver = :user_name)
           AND DATE("timestamp") BETWEEN :start_date AND :end_date
     """)
-    result = await session.execute(
-        query,
-        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
-    )
+    result = await session.execute(query, {"user_name": user_name, "start_date": start_date_obj, "end_date": end_date_obj})
     count = result.scalar()
-    return {"user_id": user_id, "total_count": count}
+    return {"email": email, "user_name": user_name, "total_count": count}
 
-
+# --- 사용자 목록 ---
 @app.get("/api/users")
 async def get_available_users(session: AsyncSession = Depends(get_db_session)):
     query = text("SELECT DISTINCT name FROM public.employee ORDER BY name")
@@ -247,6 +303,7 @@ async def get_available_users(session: AsyncSession = Depends(get_db_session)):
     users = [row[0] for row in result.fetchall()]
     return {"users": users, "count": len(users)}
 
+# --- DB health ---
 @app.get("/api/db-health")
 async def db_health(session: AsyncSession = Depends(get_db_session)):
     try:
@@ -255,16 +312,19 @@ async def db_health(session: AsyncSession = Depends(get_db_session)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- 서비스 health ---
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
+# --- 요약 생성 ---
 @app.post("/api/generate-summary", response_model=ReportResponse)
 async def generate_summary(request: ReportRequest):
     dummy_reports = f"Task {request.task_id} 보고서 (기간 {request.start_date}~{request.end_date})"
     manager_summary = await manager_chain.ainvoke({"team_reports": dummy_reports})
     return ReportResponse(summary=manager_summary)
 
+# --- 주간 보고서 생성 ---
 @app.post("/reports/weekly")
 async def make_weekly_report(p: ReportIn, session: AsyncSession = Depends(get_db_session)):
     reports = []
@@ -285,12 +345,13 @@ async def make_weekly_report(p: ReportIn, session: AsyncSession = Depends(get_db
         elif platform == "onedrive":
             query = text("SELECT id, content, writer AS actor, task_id, \"timestamp\"::text as ts FROM public.onedrive WHERE id = ANY(:ids)")
 
+        # ✅ 여기 수정됨
         if query is not None:
             result = await session.execute(query, {"ids": ids})
             rows = [dict(r._mapping) for r in result.fetchall()]
             all_platform_data.extend(rows)
 
-    # 2. task_id별로 그룹핑
+    # 2. task_id별 그룹핑
     grouped = {}
     for d in all_platform_data:
         task_id = d.get("task_id")
@@ -300,7 +361,7 @@ async def make_weekly_report(p: ReportIn, session: AsyncSession = Depends(get_db
 
     # 3. 보고서 생성
     for task_id, items in grouped.items():
-        task_id_int = int(task_id)   # <-- 여기서 변환
+        task_id_int = int(task_id)
         report_md = await generate_report_for_task(task_id_int, items, p.start, p.end, session)
         await insert_report(task_id_int, p.writer, p.email, report_md, session)
         reports.append({"task_id": task_id_int, "report": report_md})
