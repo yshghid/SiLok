@@ -3,7 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 import asyncio
 
 app = FastAPI()
@@ -32,24 +32,29 @@ async def get_db_session():
     async with async_session() as session:
         yield session
 
-async def get_user_slack_data(user_id: str, start_date: datetime, end_date: datetime, session: AsyncSession) -> List[TimelineActivity]:
+async def get_user_slack_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
     """사용자별 Slack 메시지 데이터 조회"""
+    # 문자열을 date 객체로 변환
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
     query = text("""
         SELECT
             s.id,
             s.content,
             s.receiver,
             s.sender,
+            s.task_id,
             s."timestamp"::text as timestamp
         FROM public.slack s
         WHERE (s.sender = :user_id OR s.receiver = :user_id)
-            AND s."timestamp" BETWEEN :start_date AND :end_date
+            AND DATE(s."timestamp") BETWEEN :start_date AND :end_date
         ORDER BY s."timestamp" DESC
     """)
 
     result = await session.execute(
         query,
-        {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     activities = []
@@ -61,19 +66,26 @@ async def get_user_slack_data(user_id: str, start_date: datetime, end_date: date
             content=row_dict["content"],
             metadata={
                 "sender": row_dict["sender"],
-                "receiver": row_dict["receiver"]
+                "receiver": row_dict["receiver"],
+                "task_id": row_dict["task_id"],
+                "slack_id": row_dict["id"]
             }
         ))
 
     return activities
 
-async def get_user_notion_data(user_id: str, start_date: datetime, end_date: datetime, session: AsyncSession) -> List[TimelineActivity]:
+async def get_user_notion_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
     """사용자별 Notion 데이터 조회 (participant 테이블과 조인)"""
+    # 문자열을 date 객체로 변환
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
     query = text("""
         SELECT
             n.id,
             n.content,
             n.participant_id,
+            n.task_id,
             n."timestamp"::text as timestamp,
             COALESCE(
                 ARRAY_TO_STRING(
@@ -90,13 +102,13 @@ async def get_user_notion_data(user_id: str, start_date: datetime, end_date: dat
             WHERE p2.notion_id = n.id
             AND :user_id IN (p2.p1, p2.p2, p2.p3, p2.p4, p2.p5, p2.p6)
         )
-        AND n."timestamp" BETWEEN :start_date AND :end_date
+        AND DATE(n."timestamp") BETWEEN :start_date AND :end_date
         ORDER BY n."timestamp" DESC
     """)
 
     result = await session.execute(
         query,
-        {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     activities = []
@@ -108,29 +120,36 @@ async def get_user_notion_data(user_id: str, start_date: datetime, end_date: dat
             content=row_dict["content"],
             metadata={
                 "participant_id": row_dict["participant_id"],
-                "participants": row_dict["participants"]
+                "participants": row_dict["participants"],
+                "task_id": row_dict["task_id"],
+                "notion_id": row_dict["id"]
             }
         ))
 
     return activities
 
-async def get_user_onedrive_data(user_id: str, start_date: datetime, end_date: datetime, session: AsyncSession) -> List[TimelineActivity]:
+async def get_user_onedrive_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
     """사용자별 OneDrive 데이터 조회"""
+    # 문자열을 date 객체로 변환
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
     query = text("""
         SELECT
             od.id,
             od.content,
             od.writer,
+            od.task_id,
             od."timestamp"::text as timestamp
         FROM public.onedrive od
         WHERE od.writer = :user_id
-            AND od."timestamp" BETWEEN :start_date AND :end_date
+            AND DATE(od."timestamp") BETWEEN :start_date AND :end_date
         ORDER BY od."timestamp" DESC
     """)
 
     result = await session.execute(
         query,
-        {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     activities = []
@@ -151,30 +170,37 @@ async def get_user_onedrive_data(user_id: str, start_date: datetime, end_date: d
             content=row_dict["content"],
             metadata={
                 "writer": row_dict["writer"],
-                "file_name": file_name
+                "file_name": file_name,
+                "task_id": row_dict["task_id"],
+                "onedrive_id": row_dict["id"]
             }
         ))
 
     return activities
 
-async def get_user_outlook_data(user_id: str, start_date: datetime, end_date: datetime, session: AsyncSession) -> List[TimelineActivity]:
+async def get_user_outlook_data(user_id: str, start_date: str, end_date: str, session: AsyncSession) -> List[TimelineActivity]:
     """사용자별 Outlook 데이터 조회"""
+    # 문자열을 date 객체로 변환
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
     query = text("""
         SELECT
             o.id,
             o.content,
             o.sender,
             o.receiver,
+            o.task_id,
             o."timestamp"::text as timestamp
         FROM public.outlook o
         WHERE (o.sender = :user_id OR o.receiver = :user_id)
-            AND o."timestamp" BETWEEN :start_date AND :end_date
+            AND DATE(o."timestamp") BETWEEN :start_date AND :end_date
         ORDER BY o."timestamp" DESC
     """)
 
     result = await session.execute(
         query,
-        {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     activities = []
@@ -196,7 +222,9 @@ async def get_user_outlook_data(user_id: str, start_date: datetime, end_date: da
             metadata={
                 "sender": row_dict["sender"],
                 "receiver": row_dict["receiver"],
-                "subject": subject
+                "subject": subject,
+                "task_id": row_dict["task_id"],
+                "outlook_id": row_dict["id"]
             }
         ))
 
@@ -205,8 +233,8 @@ async def get_user_outlook_data(user_id: str, start_date: datetime, end_date: da
 @app.get("/api/user-timeline/{user_id}", response_model=UserTimelineResponse)
 async def get_user_timeline(
     user_id: str,
-    start_date: datetime = Query(..., description="시작 날짜 (YYYY-MM-DD HH:MM:SS)"),
-    end_date: datetime = Query(..., description="종료 날짜 (YYYY-MM-DD HH:MM:SS)"),
+    start_date: str = Query(..., description="시작 날짜 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="종료 날짜 (YYYY-MM-DD)"),
     session: AsyncSession = Depends(get_db_session)
 ):
     """
@@ -221,16 +249,11 @@ async def get_user_timeline(
     """
 
     try:
-        # 4개 데이터 소스를 병렬로 조회
-        tasks = [
-            get_user_slack_data(user_id, start_date, end_date, session),
-            get_user_notion_data(user_id, start_date, end_date, session),
-            get_user_onedrive_data(user_id, start_date, end_date, session),
-            get_user_outlook_data(user_id, start_date, end_date, session)
-        ]
-
-        results = await asyncio.gather(*tasks)
-        slack_data, notion_data, onedrive_data, outlook_data = results
+        # 4개 데이터 소스를 순차적으로 조회 (세션 충돌 방지)
+        slack_data = await get_user_slack_data(user_id, start_date, end_date, session)
+        notion_data = await get_user_notion_data(user_id, start_date, end_date, session)
+        onedrive_data = await get_user_onedrive_data(user_id, start_date, end_date, session)
+        outlook_data = await get_user_outlook_data(user_id, start_date, end_date, session)
 
         # 모든 활동을 하나의 리스트로 통합
         all_activities = []
@@ -244,8 +267,8 @@ async def get_user_timeline(
 
         return UserTimelineResponse(
             user_id=user_id,
-            start_date=start_date.isoformat(),
-            end_date=end_date.isoformat(),
+            start_date=start_date,
+            end_date=end_date,
             activities=all_activities,
             summary={
                 "total_count": len(all_activities),
@@ -262,38 +285,41 @@ async def get_user_timeline(
 @app.get("/api/user-summary/{user_id}")
 async def get_user_activity_summary(
     user_id: str,
-    start_date: datetime = Query(..., description="시작 날짜"),
-    end_date: datetime = Query(..., description="종료 날짜"),
+    start_date: str = Query(..., description="시작 날짜 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="종료 날짜 (YYYY-MM-DD)"),
     session: AsyncSession = Depends(get_db_session)
 ):
     """사용자별 활동 요약 정보 조회"""
+    # 문자열을 date 객체로 변환
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     # 각 소스별 건수만 조회하는 가벼운 쿼리
     summary_query = text("""
         SELECT
             (SELECT COUNT(*) FROM public.slack
              WHERE (sender = :user_id OR receiver = :user_id)
-             AND "timestamp" BETWEEN :start_date AND :end_date) as slack_count,
+             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as slack_count,
 
             (SELECT COUNT(*) FROM public.notion n
              WHERE EXISTS (
                  SELECT 1 FROM public.participant p
                  WHERE p.notion_id = n.id
                  AND :user_id IN (p.p1, p.p2, p.p3, p.p4, p.p5, p.p6)
-             ) AND n."timestamp" BETWEEN :start_date AND :end_date) as notion_count,
+             ) AND DATE(n."timestamp") BETWEEN :start_date AND :end_date) as notion_count,
 
             (SELECT COUNT(*) FROM public.onedrive
              WHERE writer = :user_id
-             AND "timestamp" BETWEEN :start_date AND :end_date) as onedrive_count,
+             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as onedrive_count,
 
             (SELECT COUNT(*) FROM public.outlook
              WHERE (sender = :user_id OR receiver = :user_id)
-             AND "timestamp" BETWEEN :start_date AND :end_date) as outlook_count
+             AND DATE("timestamp") BETWEEN :start_date AND :end_date) as outlook_count
     """)
 
     result = await session.execute(
         summary_query,
-        {"user_id": user_id, "start_date": start_date, "end_date": end_date}
+        {"user_id": user_id, "start_date": start_date_obj, "end_date": end_date_obj}
     )
 
     row = result.fetchone()
