@@ -89,7 +89,13 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        # bcrypt로 검증 시도
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        # bcrypt가 아니면 평문 비교
+        return plain_password == hashed_password
+
 
 # ====================================
 # 인증용 스키마
