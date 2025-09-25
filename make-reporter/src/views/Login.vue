@@ -32,6 +32,7 @@ const onLogin = async () => {
       };
       localStorage.setItem('userInfo', JSON.stringify(userInfo));
       console.log('로그인된 사용자 정보:', userInfo);
+      
       if (res.data.user.id == "5") {
         router.push("/report-generator")
       } else {

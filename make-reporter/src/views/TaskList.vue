@@ -2,9 +2,9 @@
   <div class="task-wrapper">
     <!-- 제목 -->
     <div class="page-title-box">
-      <h1 class="page-title">주간보고서 만들기</h1>
+      <h1 class="page-title">SILOK</h1>
     </div>
-    <!-- 확인용 주석 -->
+
     <div class="content">
       <!-- 왼쪽: 캘린더 + 버튼 + 테이블 -->
       <div class="left-box">
@@ -17,13 +17,8 @@
           </div>
           <div class="calendar-grid">
             <div class="day-name" v-for="d in dayNames" :key="d">{{ d }}</div>
-            <div
-              v-for="(day, idx) in calendarDays"
-              :key="idx"
-              class="day"
-              :class="dayClass(day)"
-              @click="selectDate(day)"
-            >
+            <div v-for="(day, idx) in calendarDays" :key="idx" class="day" :class="dayClass(day)"
+              @click="selectDate(day)">
               {{ !isNaN(day) ? day.getDate() : "" }}
             </div>
           </div>
@@ -87,8 +82,27 @@
       <!-- 오른쪽: 분석 보고서 -->
       <div class="right-box">
         <h2>분석 보고서</h2>
-        <p>여기에 분석 결과가 출력됩니다.</p>
+
+        <!-- 보고서 생성 중일 때 로딩 스피너 -->
+        <div v-if="reportLoading" class="spinner-wrapper">
+          <div class="spinner"></div>
+          <p>보고서를 생성 중입니다...</p>
+        </div>
+
+        <!-- 보고서가 있을 때 -->
+        <div v-else-if="analysisReports.length > 0" class="analysis-content">
+          <div v-for="(report, idx) in analysisReports" :key="idx" class="single-report">
+            <div v-html="formatAnalysisReport(report)"></div>
+            <hr />
+          </div>
+        </div>
+
+        <!-- 보고서가 없을 때 -->
+        <div v-else class="no-analysis">
+          <p>보고서를 생성하면 분석 결과가 여기에 표시됩니다.</p>
+        </div>
       </div>
+
     </div>
   </div>
 </template>
@@ -209,6 +223,8 @@ const filteredTasks = ref([]);
 const selectAll = ref(false);
 const loading = ref(false);
 const error = ref(null);
+const analysisReports = ref([]);
+const reportLoading = ref(false);  // 보고서 생성 로딩 상태
 
 // API 호출 함수
 const fetchUserTimeline = async () => {
@@ -216,7 +232,7 @@ const fetchUserTimeline = async () => {
     error.value = "로그인이 필요합니다.";
     return;
   }
-  
+
   if (!startDate.value || !endDate.value) {
     error.value = "시작일과 종료일을 선택해주세요.";
     return;
@@ -229,40 +245,49 @@ const fetchUserTimeline = async () => {
     // POST 요청을 위한 시간 포함 날짜 포맷팅
     const startDateStr = formatDateTimeForAPI(startDate.value);
     const endDateStr = formatDateTimeForAPI(endDate.value);
-    
+
     const response = await fetch(
-      `http://127.0.0.1:8001/api/user-timeline`,
+      `http://127.0.0.1:8001/api/user-timeline/${userEmail.value}?start_date=${formatDateForAPI(startDate.value)}&end_date=${formatDateForAPI(endDate.value)}`,
       {
-        method: 'POST',
+        method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userName.value,
-          start_date: startDateStr,
-          end_date: endDateStr
-        })
+        }
       }
     );
-    
+
     if (!response.ok) {
       throw new Error(`API 호출 실패: ${response.status}`);
     }
-    
+
     const data = await response.json();
-    
+
     // API 응답을 테이블 형식으로 변환
-    tasks.value = data.activities.map(activity => ({
-      datetime: formatDateTime(activity.timestamp),
-      platform: getPlatformName(activity.source),
-      sender: activity.metadata.sender || activity.metadata.writer || "시스템",
-      receiver: activity.metadata.receiver || activity.metadata.participants || "시스템",
-      content: activity.content,
-      checked: false
-    }));
-    
+    tasks.value = data.activities.map((activity, index) => {
+      // 각 플랫폼별로 실제 ID 추출
+      let actualId = null;
+      if (activity.source === 'slack' && activity.metadata.slack_id) {
+        actualId = activity.metadata.slack_id;
+      } else if (activity.metadata.id) {
+        actualId = activity.metadata.id;
+      } else {
+        actualId = index + 1; // fallback
+      }
+
+      return {
+        id: actualId,
+        platform: getPlatformName(activity.source),
+        datetime: formatDateTime(activity.timestamp),
+        sender: activity.metadata.sender || activity.metadata.writer || "시스템",
+        receiver: activity.metadata.receiver || activity.metadata.participants || "시스템",
+        content: activity.content,
+        checked: false,
+        source: activity.source // 원본 소스 정보 보존
+      };
+    });
+
     filteredTasks.value = [...tasks.value];
-    
+
   } catch (err) {
     error.value = `데이터를 가져오는 중 오류가 발생했습니다: ${err.message}`;
     console.error("API 호출 오류:", err);
@@ -318,6 +343,7 @@ const filterTasks = () => {
   }
 };
 
+
 const resetTasks = () => {
   startDate.value = null;
   endDate.value = null;
@@ -348,17 +374,162 @@ const formatDate = (date) => {
 };
 
 // 보고서 생성 함수
-const generateReport = () => {
+const generateReport = async () => {
   const selectedTasks = filteredTasks.value.filter(task => task.checked);
   if (selectedTasks.length === 0) {
     alert("보고서에 포함할 업무를 선택해주세요.");
     return;
   }
-  
-  // 여기에 보고서 생성 로직 추가
-  console.log("선택된 업무:", selectedTasks);
-  alert(`${selectedTasks.length}개의 업무가 선택되었습니다. 보고서 생성 기능은 추후 구현됩니다.`);
+
+  if (!startDate.value || !endDate.value) {
+    alert("시작일과 종료일을 선택해주세요.");
+    return;
+  }
+  reportLoading.value = true;  // 보고서 생성 시작
+
+  try {
+    // 선택된 업무들을 플랫폼별로 ID 수집
+    const platformIds = {
+      slack: [],
+      notion: [],
+      outlook: [],
+      onedrive: []
+    };
+
+    // 선택된 업무들을 플랫폼별로 ID 수집
+    selectedTasks.forEach((task) => {
+      const id = task.id;
+      // source 정보를 기반으로 플랫폼 분류
+      switch (task.source) {
+        case 'slack':
+          platformIds.slack.push(id);
+          break;
+        case 'notion':
+          platformIds.notion.push(id);
+          break;
+        case 'outlook':
+          platformIds.outlook.push(id);
+          break;
+        case 'onedrive':
+          platformIds.onedrive.push(id);
+          break;
+        default:
+          // platform 이름으로 fallback
+          switch (task.platform) {
+            case 'Slack':
+              platformIds.slack.push(id);
+              break;
+            case 'Notion':
+              platformIds.notion.push(id);
+              break;
+            case 'Outlook':
+              platformIds.outlook.push(id);
+              break;
+            case 'OneDrive':
+              platformIds.onedrive.push(id);
+              break;
+            default:
+              platformIds.slack.push(id);
+              break;
+          }
+          break;
+      }
+    });
+
+    console.log('선택된 플랫폼 ID:', platformIds);
+
+    const requestData = {
+      platform_ids: platformIds,
+      start: formatDateForAPI(startDate.value),
+      end: formatDateForAPI(endDate.value),
+      email: userEmail.value,
+      writer: userName.value
+    };
+
+
+    console.log('보고서 생성 요청 데이터:', requestData);
+
+    const response = await fetch('http://127.0.0.1:8001/reports/weekly', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    console.log('API 응답 상태:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API 오류 응답:', errorText);
+      throw new Error(`보고서 생성 실패: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('보고서 생성 결과:', result);
+
+    // 분석보고서를 오른쪽 박스에 표시
+    displayAnalysisReport(result);
+
+  } catch (error) {
+    console.error('보고서 생성 오류:', error);
+    alert(`보고서 생성 중 오류가 발생했습니다: ${error.message}`);
+  }
+  finally{
+    reportLoading.value = false;  // 보고서 생성 종료
+  }
 };
+
+// 분석보고서 표시 함수
+const displayAnalysisReport = (result) => {
+  if (result.reports && Array.isArray(result.reports)) {
+    analysisReports.value = result.reports.map(r => r.report);
+  } else {
+    analysisReports.value = [];
+  }
+};
+
+const formatAnalysisReport = (report) => {
+  if (!report) return '';
+
+  let html = report;
+
+  // 헤더 변환 (# ## ### #### → 테마 색상 적용)
+  html = html.replace(/^#### (.*$)/gm, '<h6 class="md-title">$1</h6>');
+  html = html.replace(/^### (.*$)/gm, '<h5 class="md-title">$1</h5>');
+  html = html.replace(/^## (.*$)/gm, '<h4 class="md-title">$1</h4>');
+  html = html.replace(/^# (.*$)/gm, '<h3 class="md-title">$1</h3>');
+
+  // 강조 텍스트 변환
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // 코드 블록 변환 (```로 감싸진 부분)
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+
+  // 인라인 코드 변환 (`로 감싸진 부분)
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // 링크 변환 [텍스트](URL)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // 리스트 변환 (- 또는 *로 시작하는 줄)
+  html = html.replace(/^[\s]*[-*] (.+)$/gm, '<li>$1</li>');
+
+  // 연속된 <li> 태그를 <ul>로 감싸기
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+
+  // 줄바꿈 처리
+  html = html.replace(/\n\n/g, '<br><br>');
+  html = html.replace(/\n/g, '<br>');
+
+  // 수평선 변환 (--- 또는 ***)
+  html = html.replace(/^---$/gm, '<hr>');
+  html = html.replace(/^\*\*\*$/gm, '<hr>');
+
+  return html;
+};
+
 
 // 로그아웃 함수
 const logout = () => {
@@ -366,6 +537,7 @@ const logout = () => {
   userInfo.value = null;
   userName.value = "";
   userEmail.value = "";
+  analysisReports.value = [];
   console.log('로그아웃되었습니다.');
   // router.push('/');
 };
