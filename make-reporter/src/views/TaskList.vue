@@ -109,12 +109,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import "../styles/tasklist.css";
 
 // 로그인한 사용자 정보
 const userInfo = ref(null);
 const userName = ref("");
 const userEmail = ref("");
+
+const router = useRouter();
 
 // localStorage에서 사용자 정보 가져오기
 const loadUserInfo = () => {
@@ -539,6 +542,6 @@ const logout = () => {
   userEmail.value = "";
   analysisReports.value = [];
   console.log('로그아웃되었습니다.');
-  // router.push('/');
+  router.push('/');
 };
 </script>
