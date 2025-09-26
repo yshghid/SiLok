@@ -1,7 +1,7 @@
 <template>
   <div class="report-generator-wrapper">
     <div class="page-title-box">
-      <h1 class="page-title">Reportify</h1>
+      <h1 class="page-title">SILOK</h1>
     </div>
 
     <div class="content">

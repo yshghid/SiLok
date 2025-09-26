@@ -64,7 +64,7 @@ const onSignUp = async () => {
   <div class="auth-wrapper">
     <!-- 로그인 화면 -->
     <div v-if="!isSignUp" class="auth-box">
-      <h1 class="project-title">Repotify</h1>
+      <h1 class="project-title">SILOK</h1>
       <label>이메일</label>
       <input type="email" v-model="loginEmail" />
       <label>비밀번호</label>
@@ -75,7 +75,7 @@ const onSignUp = async () => {
 
     <!-- 회원가입 화면 -->
     <div v-else class="auth-box">
-      <h1 class="project-title">Repotify</h1>
+      <h1 class="project-title">SILOK</h1>
       <label>이름</label>
       <input type="text" v-model="signUpName" />
       <label>이메일</label>
