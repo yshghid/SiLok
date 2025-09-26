@@ -330,13 +330,14 @@ COPY public.participant (id, notion_id, p1, p2, p3, p4, p5, p6) FROM stdin;
 -- Data for Name: report; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.report (id, task_id, timestamp, writer, email, content) FROM stdin;
-1	1	2025-09-22 14:30:00	김민준	kimminjun@skax.co.kr	로그인 API 성능 개선 작업을 완료했습니다. 기존 500ms에서 150ms로 응답 시간을 단축했고, 오늘 오후에 배포 예정입니다.
-2	2	2025-09-23 11:00:00	박서연	parkseoyeon@skax.co.kr	주간 기획 회의록입니다. 신규 '스마트 리포트' 기능의 MVP 범위를 확정했습니다. UI/UX 디자인은 다음 주까지 초안을 공유하기로 했습니다.
-3	1	2025-09-23 17:45:00	김민준	kimminjun@skax.co.kr	CS팀에서 전달된 '데이터 다운로드 오류' 버그 재현 및 원인 파악 완료. 핫픽스 준비 중이며, 내일 오전 중으로 해결 가능할 것 같습니다.
-4	3	2025-09-24 09:10:00	이수진	leesujin@skax.co.kr	3분기 마케팅 실적 분석 보고서 초안을 공유합니다. 피드백 부탁드립니다.
-5	4	2025-09-24 10:25:00	최준영	choijunyoung@skax.co.kr	알파 프로젝트 관련하여 외부 업체와 미팅을 진행했으며, 견적서를 수령했습니다.
-\.
+-- 테스트용 report 더미
+-- COPY public.report (id, task_id, timestamp, writer, email, content) FROM stdin;
+-- 1	1	2025-09-22 14:30:00	김민준	kimminjun@skax.co.kr	로그인 API 성능 개선 작업을 완료했습니다. 기존 500ms에서 150ms로 응답 시간을 단축했고, 오늘 오후에 배포 예정입니다.
+-- 2	2	2025-09-23 11:00:00	박서연	parkseoyeon@skax.co.kr	주간 기획 회의록입니다. 신규 '스마트 리포트' 기능의 MVP 범위를 확정했습니다. UI/UX 디자인은 다음 주까지 초안을 공유하기로 했습니다.
+-- 3	1	2025-09-23 17:45:00	김민준	kimminjun@skax.co.kr	CS팀에서 전달된 '데이터 다운로드 오류' 버그 재현 및 원인 파악 완료. 핫픽스 준비 중이며, 내일 오전 중으로 해결 가능할 것 같습니다.
+-- 4	3	2025-09-24 09:10:00	이수진	leesujin@skax.co.kr	3분기 마케팅 실적 분석 보고서 초안을 공유합니다. 피드백 부탁드립니다.
+-- 5	4	2025-09-24 10:25:00	최준영	choijunyoung@skax.co.kr	알파 프로젝트 관련하여 외부 업체와 미팅을 진행했으며, 견적서를 수령했습니다.
+-- \.
 
 --
 -- Data for Name: slack; Type: TABLE DATA; Schema: public; Owner: postgres
