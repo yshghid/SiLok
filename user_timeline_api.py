@@ -615,18 +615,6 @@ async def health_check():
 #    manager_summary = await manager_chain.ainvoke({"team_reports": dummy_reports})
 #    return ReportResponse(summary=manager_summary)
 
-# --- 요약 생성 - 소현 0927 ---
-#@app.post("/api/generate-summary", response_model=ReportResponse)
-#async def generate_summary(request: ReportRequest):
-#    """기존 관리자 요약API (기존 기능 유지)"""
-#    task_mapping = { "프로젝트 1: 온라인 쇼핑몰 시스템 구축": 1, "프로젝트 2: 병원 예약·진료 시스템 통합": 2, }
-#    task_id = task_mapping.get(request.task_name)
-#
-#    dummy_reports = f"Task {request.task_name} 보고서 (기간 {request.start_date}~{request.end_date})"
-#    manager_summary = await manager_chain.ainvoke({"team_reports": dummy_reports})
-#    
-#    return ReportResponse(summary=manager_summary)
-
 from sqlalchemy import text
 import numpy as np
 
