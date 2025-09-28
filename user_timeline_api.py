@@ -691,7 +691,7 @@ async def generate_summary(request: ReportRequest, session: AsyncSession = Depen
     if reports_for_summary:
         context_summary = "\n".join([r["content"] for r in reports_for_summary])
     else:
-        context_summary = "⚠️ 유사도가 0.5 이상인 보고서가 없습니다."
+        context_summary = "⚠️ 유사도가 0.3 이상인 보고서가 없습니다."
 
     # LLM 요약 실행
     manager_summary = await manager_chain.ainvoke({"team_reports": context_summary})
