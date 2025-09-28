@@ -28,15 +28,29 @@
           </div>
         </div>
 
-        <!-- Task ID 입력 -->
+        <!-- 프로젝트 선택 -->
         <div class="input-section">
-          <label for="task-id">Task ID:</label>
-          <input
-            id="task-id"
-            v-model.number="taskId"
-            type="number"
+          <label for="project-select">프로젝트 선택:</label>
+          <select
+            id="project-select"
+            v-model="selectedProject"
             class="input-field"
-            placeholder="Task ID를 입력하세요"
+          >
+            <option value="" disabled>프로젝트를 선택하세요</option>
+            <option value="프로젝트 1: 온라인 쇼핑몰 시스템 구축">프로젝트 1: 온라인 쇼핑몰 시스템 구축</option>
+            <option value="프로젝트 2: 병원 예약·진료 시스템 통합">프로젝트 2: 병원 예약·진료 시스템 통합</option>
+          </select>
+        </div>
+
+        <!-- 관리자 요청 입력 -->
+        <div class="input-section">
+          <label for="admin-request">관리자 요청:</label>
+          <input
+            id="admin-request"
+            v-model="adminRequest"
+            type="text"
+            class="input-field"
+            placeholder="요청사항을 입력하세요 (예: 트러블슈팅, 프로젝트 진행상황 등)"
           />
         </div>
 
@@ -107,8 +121,11 @@ const currentMonth = ref(today.getMonth());
 const startDate = ref(null);
 const endDate = ref(null);
 
-// Task ID 입력값
-const taskId = ref(null);
+// 프로젝트 선택값
+const selectedProject = ref("");
+
+// 관리자 요청 입력값
+const adminRequest = ref("");
 
 // 보고서 상태
 const reportText = ref("");
@@ -119,10 +136,10 @@ const error = ref(null);
 const renderedMarkdown = computed(() => {
   if (!reportText.value) return "";
 
-  // 보고서 내용 앞에 날짜 및 Task ID 정보 추가
+  // 보고서 내용 앞에 프로젝트, 날짜 및 관리자 요청 정보 추가
   const dateInfo = formatDateForDisplay(startDate.value);
   const endDateInfo = formatDateForDisplay(endDate.value);
-  const headerInfo = `**주간 업무 요약**\n\n- **Task ID**: ${taskId.value}\n- **보고 기간**: ${dateInfo} ~ ${endDateInfo}\n\n---\n\n`;
+  const headerInfo = `**주간 업무 요약**\n\n- **프로젝트**: ${selectedProject.value}\n- **관리자 요청**: ${adminRequest.value}\n- **보고 기간**: ${dateInfo} ~ ${endDateInfo}\n\n---\n\n`;
 
   const fullContent = headerInfo + reportText.value;
   return marked(fullContent);
@@ -212,7 +229,7 @@ const nextMonth = () => {
 
 // 보고서 생성 가능 여부
 const canGenerate = computed(() => {
-  return startDate.value && endDate.value && taskId.value;
+  return startDate.value && endDate.value && selectedProject.value && adminRequest.value.trim();
 });
 
 // API용 날짜 포맷팅 (날짜만)
@@ -226,7 +243,7 @@ const formatDateForAPI = (date) => {
 // 보고서 생성 함수
 const generateReport = async () => {
   if (!canGenerate.value) {
-    error.value = "날짜와 Task ID를 모두 입력해주세요.";
+    error.value = "날짜, 프로젝트 선택, 관리자 요청을 모두 입력해주세요.";
     return;
   }
 
@@ -244,9 +261,10 @@ const generateReport = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        task_id: taskId.value,
         start_date: startDateStr,
-        end_date: endDateStr
+        end_date: endDateStr,
+        task_name: selectedProject.value,
+        admin_request: adminRequest.value
       })
     });
 
