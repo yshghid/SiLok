@@ -275,4 +275,34 @@ body {
   margin-bottom: 8px;
 }
 
+/* Word 다운로드 버튼 스타일 */
+.download-section {
+  margin-top: 20px;
+  text-align: center;
+  padding: 15px;
+  border-top: 1px solid #eee;
+}
+
+.download-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.download-btn:hover {
+  background: #218838;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.download-btn:active {
+  transform: translateY(1px);
+}
+
 

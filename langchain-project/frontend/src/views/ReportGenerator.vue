@@ -64,7 +64,7 @@
 
       <!-- 오른쪽: 보고서 결과 텍스트 -->
       <div class="right-box">
-        <h2>보고서 내용</h2>
+        <h2>요약 보고서 내용</h2>
         <div class="report-content">
           <div v-if="loading" class="loading-message">
             보고서를 생성하는 중입니다...

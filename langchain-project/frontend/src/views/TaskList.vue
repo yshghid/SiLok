@@ -79,9 +79,9 @@
         </div>
       </div>
 
-      <!-- 오른쪽: 분석 보고서 -->
+      <!-- 오른쪽: 주간업무 보고서 -->
       <div class="right-box">
-        <h2>분석 보고서</h2>
+        <h2>업무 보고서 내용</h2>
 
         <!-- 보고서 생성 중일 때 로딩 스피너 -->
         <div v-if="reportLoading" class="spinner-wrapper">
@@ -94,6 +94,13 @@
           <div v-for="(report, idx) in analysisReports" :key="idx" class="single-report">
             <div v-html="formatAnalysisReport(report)"></div>
             <hr />
+          </div>
+
+          <!-- Word 파일 다운로드 버튼 -->
+          <div class="download-section">
+            <button class="download-btn" @click="downloadAsWord">
+              📄 Word 파일로 다운로드
+            </button>
           </div>
         </div>
 
@@ -110,6 +117,8 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
+import { saveAs } from 'file-saver';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import "../styles/tasklist.css";
 
 // 로그인한 사용자 정보
@@ -533,6 +542,145 @@ const formatAnalysisReport = (report) => {
   return html;
 };
 
+
+// 마크다운 문법 제거 함수
+const removeMarkdown = (text) => {
+  return text
+    // 제목 (#, ##, ###)
+    .replace(/^#{1,6}\s+/gm, '')
+    // 굵은 글씨 (**text**, __text__)
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    // 기울임 (*text*, _text_)
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    // 코드 블록 (```code```)
+    .replace(/```[\s\S]*?```/g, '')
+    // 인라인 코드 (`code`)
+    .replace(/`([^`]+)`/g, '$1')
+    // 링크 [text](url)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // 이미지 ![alt](url)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    // 목록 (-, *, +)
+    .replace(/^[\s]*[-\*\+]\s+/gm, '• ')
+    // 숫자 목록
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // 인용문 (>)
+    .replace(/^>\s+/gm, '')
+    // 수평선 (---, ***)
+    .replace(/^[-\*]{3,}$/gm, '─────────────────────────')
+    // 여러 개의 연속된 공백을 하나로
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
+// 날짜를 표시용으로 포맷팅
+const formatDateForDisplay = (date) => {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}년 ${month}월 ${day}일`;
+};
+
+// Word 파일 다운로드 기능
+const downloadAsWord = async () => {
+  if (analysisReports.value.length === 0) return;
+
+  try {
+    // 날짜 정보
+    const dateInfo = formatDateForDisplay(startDate.value);
+    const endDateInfo = formatDateForDisplay(endDate.value);
+
+    // 모든 보고서를 하나의 텍스트로 합치기
+    const allReports = analysisReports.value.join('\n\n=================\n\n');
+
+    // 마크다운 제거된 텍스트
+    const cleanText = removeMarkdown(allReports);
+
+    // Word 문서 생성
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          // 제목
+          new Paragraph({
+            children: [new TextRun({ text: "주간 업무 보고서", bold: true, size: 32 })],
+            heading: HeadingLevel.HEADING_1,
+          }),
+
+          // 빈 줄
+          new Paragraph({ children: [new TextRun("")] }),
+
+          // 작성자 정보
+          new Paragraph({
+            children: [
+              new TextRun({ text: "작성자: ", bold: true }),
+              new TextRun({ text: userName.value })
+            ]
+          }),
+
+          // 기간
+          new Paragraph({
+            children: [
+              new TextRun({ text: "보고 기간: ", bold: true }),
+              new TextRun({ text: `${dateInfo} ~ ${endDateInfo}` })
+            ]
+          }),
+
+          // 구분선
+          new Paragraph({ children: [new TextRun("─────────────────────────")] }),
+          new Paragraph({ children: [new TextRun("")] }),
+
+          // 보고서 내용 (마크다운 제거된 텍스트)
+          ...cleanText.split('\n').map(line => {
+            // 빈 줄 처리
+            if (line.trim() === '') {
+              return new Paragraph({ children: [new TextRun("")] });
+            }
+
+            // 제목처럼 보이는 줄 (대문자로 시작하고 끝에 :가 있는 경우) 굵게 처리
+            if (line.match(/^[A-Z가-힣][^:]*:?\s*$/) || line.includes('##') || line.includes('**')) {
+              return new Paragraph({
+                children: [new TextRun({ text: line, bold: true })]
+              });
+            }
+
+            // 구분선 처리
+            if (line.includes('=================')) {
+              return new Paragraph({
+                children: [new TextRun({ text: "─────────────────────────", bold: true })]
+              });
+            }
+
+            // 일반 텍스트
+            return new Paragraph({
+              children: [new TextRun({ text: line })]
+            });
+          })
+        ],
+      }],
+    });
+
+    // Word 문서를 blob으로 생성
+    const blob = await Packer.toBlob(doc);
+
+    // 파일명 생성
+    const startDateObj = startDate.value;
+    const weekNumber = Math.ceil(startDateObj.getDate() / 7);
+    const monthStr = String(startDateObj.getMonth() + 1).padStart(2, '0');
+
+    const filename = `${userName.value}_${startDateObj.getFullYear()}년${monthStr}월${weekNumber}주차_주간업무보고서.docx`;
+
+    // 다운로드
+    saveAs(blob, filename);
+
+  } catch (error) {
+    console.error('다운로드 오류:', error);
+    alert('파일 다운로드 중 오류가 발생했습니다.');
+  }
+};
 
 // 로그아웃 함수
 const logout = () => {
