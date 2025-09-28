@@ -341,11 +341,19 @@ const downloadAsWord = async () => {
           // 빈 줄
           new Paragraph({ children: [new TextRun("")] }),
 
-          // Task ID
+          // 프로젝트 정보
           new Paragraph({
             children: [
-              new TextRun({ text: "Task ID: ", bold: true }),
-              new TextRun({ text: taskId.value.toString() })
+              new TextRun({ text: "프로젝트: ", bold: true }),
+              new TextRun({ text: selectedProject.value })
+            ]
+          }),
+
+          // 관리자 요청
+          new Paragraph({
+            children: [
+              new TextRun({ text: "관리자 요청: ", bold: true }),
+              new TextRun({ text: adminRequest.value })
             ]
           }),
 
@@ -393,7 +401,7 @@ const downloadAsWord = async () => {
     const weekNumber = Math.ceil(startDateObj.getDate() / 7);
     const monthStr = String(startDateObj.getMonth() + 1).padStart(2, '0');
 
-    const filename = `Task${taskId.value}_${startDateObj.getFullYear()}년${monthStr}월${weekNumber}주차_주간업무요약보고서.docx`;
+    const filename = `${selectedProject.value.replace(/[^가-힣a-zA-Z0-9]/g, '_')}_${startDateObj.getFullYear()}년${monthStr}월${weekNumber}주차_주간업무요약보고서.docx`;
 
     // 다운로드
     saveAs(blob, filename);
