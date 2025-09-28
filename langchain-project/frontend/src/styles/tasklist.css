@@ -39,6 +39,15 @@ body {
   margin: 0;
 }
 
+.clickable-title {
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.clickable-title:hover {
+  color: #2d7ff9;
+}
+
 /* 좌우 콘텐츠 */
 .content {
   display: flex;

@@ -34,7 +34,7 @@ const onLogin = async () => {
       console.log('로그인된 사용자 정보:', userInfo);
       
       if (res.data.user.id == "5") {
-        router.push("/report-generator")
+        router.push("/summary-generator")
       } else {
         router.push("/tasks");
       }

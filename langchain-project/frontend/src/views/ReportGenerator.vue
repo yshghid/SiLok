@@ -1,7 +1,7 @@
 <template>
   <div class="report-generator-wrapper">
     <div class="page-title-box">
-      <h1 class="page-title">SILOK</h1>
+      <h1 class="page-title clickable-title" @click="logoutAndGoHome">SILOK</h1>
     </div>
 
     <div class="content">
@@ -80,7 +80,7 @@
             </button>
           </div>
           <div v-else class="placeholder-text">
-            캘린더에서 날짜를 선택하고 Task ID를 입력한 후 '보고서 생성' 버튼을 클릭하세요.
+            캘린더에서 날짜를 선택하고 프로젝트를 선택한 후 관리자 요청을 입력하여 '보고서 생성' 버튼을 클릭하세요.
           </div>
         </div>
       </div>
@@ -90,10 +90,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import { marked } from 'marked';
 import { saveAs } from 'file-saver';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import "../styles/report-generator.css";
+
+const router = useRouter();
 
 // 로그인한 사용자 정보
 const userInfo = ref(null);
@@ -410,5 +413,26 @@ const downloadAsWord = async () => {
     console.error('다운로드 오류:', error);
     alert('파일 다운로드 중 오류가 발생했습니다.');
   }
+};
+
+// SILOK 클릭 시 로그아웃 및 홈으로 이동
+const logoutAndGoHome = () => {
+  // localStorage에서 사용자 정보 제거
+  localStorage.removeItem('userInfo');
+
+  // 상태 초기화
+  userInfo.value = null;
+  userName.value = "";
+  reportText.value = "";
+  error.value = null;
+  startDate.value = null;
+  endDate.value = null;
+  selectedProject.value = "";
+  adminRequest.value = "";
+
+  console.log('로그아웃되었습니다.');
+
+  // 홈화면(로그인 페이지)으로 이동
+  router.push('/');
 };
 </script>

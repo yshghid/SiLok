@@ -2,7 +2,7 @@
   <div class="task-wrapper">
     <!-- 제목 -->
     <div class="page-title-box">
-      <h1 class="page-title">SILOK</h1>
+      <h1 class="page-title clickable-title" @click="logoutAndGoHome">SILOK</h1>
     </div>
 
     <div class="content">
@@ -690,6 +690,31 @@ const logout = () => {
   userEmail.value = "";
   analysisReports.value = [];
   console.log('로그아웃되었습니다.');
+  router.push('/');
+};
+
+// SILOK 클릭 시 로그아웃 및 홈으로 이동 (기존 logout 함수와 동일하지만 더 많은 상태 초기화)
+const logoutAndGoHome = () => {
+  // localStorage에서 사용자 정보 제거
+  localStorage.removeItem('userInfo');
+
+  // 상태 초기화
+  userInfo.value = null;
+  userName.value = "";
+  userEmail.value = "";
+  analysisReports.value = [];
+  tasks.value = [];
+  filteredTasks.value = [];
+  selectAll.value = false;
+  loading.value = false;
+  error.value = null;
+  reportLoading.value = false;
+  startDate.value = null;
+  endDate.value = null;
+
+  console.log('로그아웃되었습니다.');
+
+  // 홈화면(로그인 페이지)으로 이동
   router.push('/');
 };
 </script>
