@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+pydantic
+python-dotenv
+langchain
+langchain-classic
+langchain-community
+langchain-core
+langchain-openai
+passlib[bcrypt]
+sentence-transformers
+numpy
