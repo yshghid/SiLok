@@ -15,7 +15,7 @@ docker ps
 PostgreSQL이 `localhost:5433`에서 실행됩니다.
 
 ```bash
-psql -h localhost -p 5433 -U myuser -d mydatabase -f backend/sample_data.sql
+psql -h localhost -p 5433 -U myuser -d mydatabase -f data/init.sql
 ```
 
 ### 1. 백엔드 서버 실행
